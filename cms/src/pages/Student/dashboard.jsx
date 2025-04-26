@@ -5,7 +5,7 @@ import { getStudentForms } from "../../firebase/firestoreService";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-export default function Dashboard() {
+function Dashboard() {
   const navigate = useNavigate();
   const [fullName, setFullName] = useState("");
   const [userEmail, setUserEmail] = useState("");
@@ -249,3 +249,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
+export default Dashboard;

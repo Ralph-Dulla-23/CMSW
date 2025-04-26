@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import AdminNavbar from '../ui/adminnavbar';
-import { getActiveInterviewForms, updateFormStatus } from '../../firebase/firestoreService';
+// Update import to use the new function
+import { getActiveCounselingForms, updateFormStatus, getReferrals } from '../../firebase/firestoreService';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import StudentDetailsModal from '../ui/studentdetailsModal'; 
+import StudentDetailsModal from '../ui/studentdetailsModal';
+import FollowUpScheduler from '../../components/FollowUpSceduler';
+import ReferralModal from '../ui/referralModal';
 
 function SubmittedFormsManagement() {
   const [forms, setForms] = useState([]);
@@ -12,13 +15,81 @@ function SubmittedFormsManagement() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
-  // Create a separate state for dropdown values
   const [dropdownValues, setDropdownValues] = useState({});
   const [showFollowUpScheduler, setShowFollowUpScheduler] = useState(false);
   const [currentFormId, setCurrentFormId] = useState(null);
-  // Add these with your other state variables
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpTime, setFollowUpTime] = useState('');
+  const [isReferralModalOpen, setIsReferralModalOpen] = useState(false);
+  const [selectedReferral, setSelectedReferral] = useState(null);
+  const [directReferrals, setDirectReferrals] = useState([]);
+
+  // Debug modal state changes
+  // Initial useEffect hooks for fetching data
+useEffect(() => {
+  fetchForms();
+  fetchDirectReferrals();
+}, []);
+
+// Debug modal state changes
+useEffect(() => {
+  console.log("Modal open state changed:", isModalOpen);
+  console.log("Selected student:", selectedStudent);
+}, [isModalOpen, selectedStudent]);
+
+// Process direct referrals after they're fetched
+useEffect(() => {
+  if (directReferrals.length > 0) {
+    console.log("Processing direct referrals for display:", directReferrals.length);
+    
+    // Map direct referrals to match the expected format for the table
+    const formattedReferrals = directReferrals.map(referral => {
+      // Extract college, year and section info
+      const college = referral.college || 'Unknown';
+      const year = referral.year || 'Unknown';
+      
+      return {
+        id: referral.id,
+        name: referral.clientName || 'Unknown',
+        course: college,
+        year: `Year ${year}${referral.section ? ` Section ${referral.section}` : ''}`,
+        type: 'Referral',
+        referral: referral.referredBy || 'Unknown',
+        remarks: referral.remarks || '',
+        status: referral.status || 'Pending',
+        isReferral: true,
+        isDirectReferral: true,
+        dateTime: referral.submissionDate || new Date().toISOString(),
+        date: referral.date || 'Unknown',
+        time: referral.time || 'Unknown',
+        
+        // Store the complete original data for reference
+        originalData: referral,
+      };
+    });
+    
+    console.log("Formatted direct referrals:", formattedReferrals);
+    
+    // Update forms state to include direct referrals
+    setForms(prevForms => {
+      // First, filter out any existing direct referrals to avoid duplicates
+      const nonDirectReferrals = prevForms.filter(form => !form.isDirectReferral);
+      
+      // Combine with the new formatted referrals
+      return [...nonDirectReferrals, ...formattedReferrals];
+    });
+    
+    // Initialize dropdown values for the new referrals
+    setDropdownValues(prev => {
+      const newValues = {...prev};
+      formattedReferrals.forEach(referral => {
+        newValues[referral.id] = '';
+      });
+      return newValues;
+    });
+  }
+}, [directReferrals]);
+  
 
   // Helper function to add proper suffix to year number
   const getYearSuffix = (num) => {
@@ -28,237 +99,235 @@ function SubmittedFormsManagement() {
     if (num >= 4) return `${num}th`;
     return 'Unknown';
   };
+  const openReferralModal = (student) => {
+    console.log("Opening referral modal with data:", student);
+    
+    // If this is a direct referral from the referrals collection, pass it directly
+    if (student.isDirectReferral || student.originalData) {
+      console.log("Processing direct referral for modal");
+      
+      // Get the original data if it exists
+      const originalData = student.originalData || student;
+      
+      // Extract the necessary data, ensuring we have all required fields
+      const referralData = {
+        id: student.id,
+        clientName: originalData.clientName || student.name || 'Unknown',
+        courseYear: `${originalData.college || 'Unknown'} - Year ${originalData.year || 'Unknown'}${originalData.section ? ` Section ${originalData.section}` : ''}`,
+        date: originalData.date || 'Unknown',
+        time: originalData.time || 'Unknown',
+        referredBy: originalData.referredBy || student.referral || 'Unknown',
+        remarks: originalData.remarks || 'None specified',
+        otherConcerns: originalData.otherConcerns || 'None specified',
+        
+        // Ensure we have arrays for concerns
+        academicConcerns: Array.isArray(originalData.academicConcerns) ? originalData.academicConcerns : ['None'],
+        personalConcerns: Array.isArray(originalData.personalConcerns) ? originalData.personalConcerns : ['None'],
+      };
+      
+      console.log("Processed referral data for modal:", referralData);
+      setSelectedReferral(referralData);
+      setIsReferralModalOpen(true);
+      return;
+    }
+    
+    // For regular referrals from counselingForms collection
+    console.log("Processing counselingForm referral for modal");
+    const formattedReferral = {
+      id: student.id,
+      clientName: student.name || (student.details?.fullName) || 'Unknown',
+      courseYear: student.course ? `${student.course} ${student.year}` : (student.details?.courseYear || 'Unknown'),
+      date: student.details?.date || 'Unknown',
+      time: student.details?.time || 'Unknown',
+      referredBy: student.referral || student.details?.referredBy || 'Unknown',
+      remarks: student.remarks || student.details?.referralRemarks || 'None specified',
+      otherConcerns: student.otherConcerns || 'None specified',
+      
+      // Format academic concerns
+      academicConcerns: Array.isArray(student.details?.academics) 
+        ? student.details.academics 
+        : (Array.isArray(student.academicConcerns) 
+          ? student.academicConcerns 
+          : ['None']),
+      
+      // Format personal concerns
+      personalConcerns: Array.isArray(student.details?.personal) 
+        ? student.details.personal 
+        : (Array.isArray(student.personalConcerns) 
+          ? student.personalConcerns 
+          : ['None']),
+    };
+    
+    console.log("Formatted referral data:", formattedReferral);
+    setSelectedReferral(formattedReferral);
+    setIsReferralModalOpen(true);
+  };
 
-  // Fetch forms on component mount
-  useEffect(() => {
-    fetchForms();
-  }, []);
-
-  const fetchForms = async () => {
-    setLoading(true);
+  const fetchDirectReferrals = async () => {
     try {
-      // Use the updated function
-      const result = await getActiveInterviewForms();
+      setLoading(true);
+      console.log("Fetching direct referrals...");
+      
+      const result = await getReferrals();
       
       if (result.success) {
-        console.log("Active forms fetched:", result.forms.length);
-        
-        // Process all forms with more robust handling of missing fields
-        const processedForms = result.forms.map(form => {
-          // Extract course and year from courseYearSection with fallbacks
-          let course = 'Unknown';
-          let year = 'Unknown';
-          
-          if (form.courseYearSection) {
-            // Try different patterns to extract course and year
-            // First, check if it contains a hyphen (like "BCSO-3A")
-            if (form.courseYearSection.includes('-')) {
-              const parts = form.courseYearSection.split('-');
-              course = parts[0] || 'Unknown';
-              
-              // Extract year from the second part (e.g., "3A")
-              if (parts[1]) {
-                const yearDigits = parts[1].match(/\d+/);
-                if (yearDigits) {
-                  const yearNum = parseInt(yearDigits[0]);
-                  year = getYearSuffix(yearNum);
-                }
-              }
-            } 
-            // Try to match standard format (e.g., "CS 101")
-            else {
-              const parts = form.courseYearSection.split(' ');
-              if (parts.length > 0) {
-                course = parts[0];
-                
-                // Look for year in the entire string
-                const yearDigits = form.courseYearSection.match(/\d+/);
-                if (yearDigits) {
-                  const yearNum = parseInt(yearDigits[0]);
-                  year = getYearSuffix(yearNum);
-                } else if (parts.length > 1) {
-                  year = parts[1];
-                }
-              }
-            }
-          }
-
-          return {
-            id: form.id,
-            name: form.studentName || form.name || 'Unknown',
-            course: course,
-            year: year,
-            type: form.type || 'Walk-in',
-            referral: form.referral || 'Self',
-            remarks: form.remarks || '',
-            status: form.status || 'Pending',
-            isReferral: form.isReferral === true, // Convert to boolean
-            dateTime: form.dateTime || form.submissionDate || new Date().toISOString(),
-            followUpDate: form.followUpDate,
-            // Add all the form data for the modal view
-            details: {
-              mode: form.isReferral === true ? 'Referral' : 'Non-Referral',
-              fullName: form.studentName || form.name || 'Unknown',
-              email: form.email || 'Unknown',
-              courseYear: form.courseYearSection || 'Unknown',
-              department: getDepartmentFromCourse(course),
-              id: form.studentId || form.id || '2200000321',
-              dob: form.dateOfBirth || 'Unknown',
-              ageSex: form.ageSex || 'Unknown',
-              contact: form.contactNo || 'Unknown',
-              address: form.presentAddress || 'Unknown',
-              emergencyContact: `${form.emergencyContactPerson || 'Unknown'} - ${form.emergencyContactNo || 'Unknown'}`,
-              date: form.dateTime ? new Date(form.dateTime).toLocaleDateString() : 'Unknown',
-              time: form.dateTime ? new Date(form.dateTime).toLocaleTimeString() : 'Unknown',
-              // Map concern areas to readable text with safeguards
-              personal: mapConcernAreasToText(form.areasOfConcern?.personal, 'personal'),
-              interpersonal: mapConcernAreasToText(form.areasOfConcern?.interpersonal, 'interpersonal'),
-              grief: ['None'],
-              academics: mapConcernAreasToText(form.areasOfConcern?.academic, 'academic'),
-              family: mapConcernAreasToText(form.areasOfConcern?.family, 'family'),
-            }
-          };
-        });
-        
-        // Initialize dropdown values
-        const initialDropdownValues = {};
-        processedForms.forEach(form => {
-          initialDropdownValues[form.id] = '';
-        });
-        setDropdownValues(initialDropdownValues);
-        
-        setForms(processedForms);
-        console.log("Forms ready for display:", processedForms.length);
+        console.log("Direct referrals fetched successfully:", result.referrals.length);
+        setDirectReferrals(result.referrals);
       } else {
-        setError("Failed to fetch forms. Please try again.");
-        toast.error("Failed to fetch forms. Please try again.");
+        console.error("Failed to fetch referrals:", result.error);
+        toast.error("Failed to fetch referrals: " + result.error);
       }
     } catch (error) {
-      console.error("Error fetching forms:", error);
-      setError("An error occurred while fetching forms.");
-      toast.error("An error occurred while fetching forms: " + error.message);
+      console.error("Error fetching direct referrals:", error);
+      toast.error("Error fetching referrals: " + error.message);
     } finally {
       setLoading(false);
     }
   };
-
-// When Follow-up is selected from dropdown
-const handleFollowUpSelection = (formId) => {
-  setCurrentFormId(formId);
-  setShowFollowUpScheduler(true);
-};
-
-// When follow-up is scheduled
-const handleFollowUpScheduled = (date, time) => {
-  handleRemarkChange(currentFormId, 'Follow up', date, '', false, time);
-  setShowFollowUpScheduler(false);
-  setCurrentFormId(null);
-};
-
- // Helper function to determine department from course code
-const getDepartmentFromCourse = (courseCode) => {
-  // Extract the program/degree code from the course code
-  // This assumes the course code starts with the program abbreviation
-  const programCode = courseCode.split(' ')[0]; // Get first part before any spaces
   
-  // Map program codes to their respective colleges
-  const collegeMap = {
-    // College of Accounting and Business Education (CABE)
-    'BSA': 'College of Accounting and Business Education',
-    'BSMA': 'College of Accounting and Business Education', // Management Accounting
-    'BSAIS': 'College of Accounting and Business Education', // Accounting Information System
-    'BSBA': 'College of Accounting and Business Education', // Business Administration
-    'BSREM': 'College of Accounting and Business Education', // Real Estate Management
+  
+  
+
+  // Helper functions for extracting concerns from mobile form data
+  const extractAcademicConcerns = (academics, referralAcademicConcerns = null) => {
+    // If this is a referral, handle referral-style concerns
+    if (referralAcademicConcerns) {
+      if (Array.isArray(referralAcademicConcerns)) {
+        return referralAcademicConcerns.length > 0 ? referralAcademicConcerns : ['None'];
+      } else if (typeof referralAcademicConcerns === 'string' && referralAcademicConcerns.trim() !== '') {
+        return [referralAcademicConcerns];
+      }
+    }
     
-    // College of Arts and Humanities (CAH)
-    'AB': 'College of Arts and Humanities',
-    'ABCOM': 'College of Arts and Humanities', // Communication
-    'ABELS': 'College of Arts and Humanities', // English Language Studies
-    'ABPhilo': 'College of Arts and Humanities', // Philosophy
-    'ABPsych': 'College of Arts and Humanities', // Psychology
+    // Handle mobile app style concerns
+    if (!academics) return ['None'];
     
-    // College of Computer Studies (CCS)
-    'BSCS': 'College of Computer Studies',
-    'BSIS': 'College of Computer Studies', // Information Systems
-    'BSIT': 'College of Computer Studies', // Information Technology
+    const concerns = [];
     
-    // College of Engineering and Architecture (CEA)
-    'BSArch': 'College of Engineering and Architecture', // Architecture
-    'BSCE': 'College of Engineering and Architecture', // Civil Engineering
-    'BSCpE': 'College of Engineering and Architecture', // Computer Engineering
-    'BSECE': 'College of Engineering and Architecture', // Electronics Engineering
+    if (academics.difficultyUnderstanding) concerns.push('Difficulty Understanding');
+    if (academics.homesickness) concerns.push('Homesickness');
+    if (academics.issueWithTeacher) concerns.push('Issues With Teacher');
+    if (academics.notHappyWithCourse) concerns.push('Not Happy With Course');
+    if (academics.notPrepared) concerns.push('Not Prepared');
+    if (academics.overlyWorried) concerns.push('Overly Worried');
+    if (academics.problemBeingOnTime) concerns.push('Problem Being On Time');
     
-    // College of Human Environmental Sciences and Food Studies (CHESFS)
-    'BSND': 'College of Human Environmental Sciences and Food Studies', // Nutrition and Dietetics
-    'BSHRM': 'College of Human Environmental Sciences and Food Studies', // Hotel Restaurant Management
-    'BSTM': 'College of Human Environmental Sciences and Food Studies', // Tourism Management
+    if (academics.academicOthers && academics.academicOthers !== "sa") {
+      concerns.push(`Other: ${academics.academicOthers}`);
+    }
     
-    // College of Medical and Biological Science (CMBS)
-    'BSBio': 'College of Medical and Biological Science', // Biology
-    'BSMLS': 'College of Medical and Biological Science', // Medical Laboratory Science
-    
-    // College of Music (CM)
-    'BM': 'College of Music',
-    
-    // College of Nursing (CN)
-    'BSN': 'College of Nursing', // Nursing
-    
-    // College of Pharmacy and Chemistry (CPC)
-    'BSP': 'College of Pharmacy and Chemistry', // Pharmacy
-    'BSChem': 'College of Pharmacy and Chemistry', // Chemistry
-    
-    // College of Teacher Education (CTE)
-    'BECE': 'College of Teacher Education', // Early Childhood Education
-    'BEEd': 'College of Teacher Education', // Elementary Education
-    'BSEd': 'College of Teacher Education', // Secondary Education
-    'BSNE': 'College of Teacher Education', // Special Needs Education
-    'BPE': 'College of Teacher Education', // Physical Education
+    return concerns.length > 0 ? concerns : ['None'];
   };
 
-  // Check for exact matches first
-  if (collegeMap[programCode]) {
-    return collegeMap[programCode];
-  }
-  
-  // For codes that might be variations or not exact matches
-  // Check if the course code starts with any of the keys in the collegeMap
-  for (const prefix in collegeMap) {
-    if (programCode.startsWith(prefix)) {
-      return collegeMap[prefix];
+  const extractPersonalConcerns = (personal, referralPersonalConcerns = null) => {
+    // If this is a referral, handle referral-style concerns
+    if (referralPersonalConcerns) {
+      if (Array.isArray(referralPersonalConcerns)) {
+        return referralPersonalConcerns.length > 0 ? referralPersonalConcerns : ['None'];
+      } else if (typeof referralPersonalConcerns === 'string' && referralPersonalConcerns.trim() !== '') {
+        return [referralPersonalConcerns];
+      }
     }
-  }
+    
+    // Handle mobile app style concerns
+    if (!personal) return ['None'];
+    
+    const concerns = [];
+    
+    if (personal.confident) concerns.push('Not feeling confident about myself');
+    if (personal.decision) concerns.push('Hard time making decisions');
+    if (personal.emotion) concerns.push('Difficulty managing emotions');
+    if (personal.mood) concerns.push('Unstable mood');
+    if (personal.sleeping) concerns.push('Problems with sleeping');
+    if (personal.stress) concerns.push('Experiencing high stress');
+    if (personal.time) concerns.push('Time management issues');
+    if (personal.worry) concerns.push('Excessive worrying');
+    if (personal.selfHarm) concerns.push('Self-harm thoughts or behaviors');
+    if (personal.suicide) concerns.push('Suicidal thoughts');
+    
+    if (personal.abuse) {
+      if (personal.abuse.emotional) concerns.push('Experienced emotional abuse');
+      if (personal.abuse.physical) concerns.push('Experienced physical abuse');
+      if (personal.abuse.psychological) concerns.push('Experienced psychological abuse');
+      if (personal.abuse.sexual) concerns.push('Experienced sexual abuse');
+      if (personal.abuse.verbal) concerns.push('Experienced verbal abuse');
+    }
+    
+    if (personal.disorder && personal.disorder !== "sa") {
+      concerns.push(`Mental health condition: ${personal.disorder}`);
+    }
+    
+    if (personal.drug && personal.drug !== "sa") {
+      concerns.push(`Substance use: ${personal.drug}`);
+    }
+    
+    if (personal.usage && personal.usage !== "asd") {
+      concerns.push(`Usage concerns: ${personal.usage}`);
+    }
+    
+    return concerns.length > 0 ? concerns : ['None'];
+  };
 
-  // Additional pattern matching for special cases
-  if (programCode.includes('BA') || programCode.includes('Acct') || programCode.includes('Fin') || 
-      programCode.includes('Mgt') || programCode.includes('HRM')) {
-    return 'College of Accounting and Business Education';
-  } else if (programCode.includes('Arch') || programCode.includes('CE') || 
-             programCode.includes('CpE') || programCode.includes('ECE')) {
-    return 'College of Engineering and Architecture';
-  } else if (programCode.includes('Ed') || programCode.includes('Edu') || programCode.includes('Teach')) {
-    return 'College of Teacher Education';
-  } else if (programCode.includes('CS') || programCode.includes('IS') || programCode.includes('IT')) {
-    return 'College of Computer Studies';
-  } else if (programCode.includes('Nurs')) {
-    return 'College of Nursing';
-  } else if (programCode.includes('Pharm') || programCode.includes('Chem')) {
-    return 'College of Pharmacy and Chemistry';
-  } else if (programCode.includes('Bio') || programCode.includes('MLS') || programCode.includes('Lab')) {
-    return 'College of Medical and Biological Science';
-  } else if (programCode.includes('ND') || programCode.includes('HRM') || programCode.includes('TM')) {
-    return 'College of Human Environmental Sciences and Food Studies';
-  } else if (programCode.includes('AB') || programCode.includes('Arts') || 
-             programCode.includes('Com') || programCode.includes('Psych') || 
-             programCode.includes('Phil')) {
-    return 'College of Arts and Humanities';
-  } else if (programCode.includes('Mus') || programCode.includes('BM')) {
-    return 'College of Music';
-  }
+  const extractFamilyConcerns = (family) => {
+    if (!family) return ['None'];
+    
+    const concerns = [];
+    
+    if (family.cannotAcceptSeparation) concerns.push('Cannot accept separation of parents');
+    if (family.familyFinancialConcern) concerns.push('Family financial concerns');
+    if (family.familyGenderPreference) concerns.push('Family gender preference issues');
+    if (family.familyMemberIllness) concerns.push('Family member illness');
+    if (family.frequentArguments) concerns.push('Frequent arguments in family');
+    if (family.hardTimeWithParents) concerns.push('Hard time with parents/guardian expectations');
+    
+    if (family.violence) {
+      if (family.violence.emotional) concerns.push('Emotional violence in family');
+      if (family.violence.physical) concerns.push('Physical violence in family');
+      if (family.violence.psychological) concerns.push('Psychological violence in family');
+      if (family.violence.verbal) concerns.push('Verbal violence in family');
+    }
+    
+    if (family.familyOpeningUp && family.familyOpeningUp !== "sa") {
+      concerns.push(`Family communication issues: ${family.familyOpeningUp}`);
+    }
+    
+    return concerns.length > 0 ? concerns : ['None'];
+  };
 
-  return 'Unknown College'; // Default if no match is found
-};
+  const extractInterpersonalConcerns = (interpersonal) => {
+    if (!interpersonal) return ['None'];
+    
+    const concerns = [];
+    
+    if (interpersonal.cannotExpressFeelings) concerns.push('Cannot express feelings to others');
+    if (interpersonal.cannotHandlePressure) concerns.push('Cannot handle peer pressure');
+    if (interpersonal.difficultyGettingAlong) concerns.push('Difficulty getting along with others');
+    if (interpersonal.isBullied) concerns.push('Being bullied');
+    
+    if (interpersonal.discrimination && interpersonal.discrimination !== "sa") {
+      concerns.push(`Experiencing discrimination: ${interpersonal.discrimination}`);
+    }
+    
+    return concerns.length > 0 ? concerns : ['None'];
+  };
 
-  // Helper function to map concern codes to readable text
+  const extractGriefConcerns = (grief) => {
+    if (!grief) return ['None'];
+    
+    const concerns = [];
+    
+    if (grief.griefExperience && grief.griefExperience !== "sa") {
+      concerns.push(`Grief experience: ${grief.griefExperience}`);
+    }
+    
+    if (grief.grievingDeathOf && grief.grievingDeathOf !== "sa") {
+      concerns.push(`Grieving death of: ${grief.grievingDeathOf}`);
+    }
+    
+    return concerns.length > 0 ? concerns : ['None'];
+  };
+
+  // Helper function to map concern codes to readable text (for legacy forms)
   const mapConcernAreasToText = (concerns, category) => {
     if (!concerns || !Array.isArray(concerns) || concerns.length === 0) {
       return ['None'];
@@ -291,7 +360,251 @@ const getDepartmentFromCourse = (courseCode) => {
     return concerns.map(concern => mappings[category][concern] || concern);
   };
 
+  const fetchForms = async () => {
+    setLoading(true);
+    try {
+      const result = await getActiveCounselingForms();
+  
+      if (result.success) {
+        console.log("Active forms fetched:", result.forms.length);
+  
+        const processedForms = result.forms.map(form => {
+          const isReferral = form.isReferral === true;
+          const isMobileSubmission = form.academics || form.personal;
+  
+          if (isMobileSubmission) {
+            // FIXED: Use year and section instead of age for mobile submissions
+            let yearDisplay = 'Unknown';
+            if (form.year) {
+              yearDisplay = `Year ${form.year}${form.section ? ` Section ${form.section}` : ''}`;
+            } else if (form.age) {
+              // Fallback to age only if year is not available
+              yearDisplay = `${form.age} years`;
+            }
+            
+            const processedForm = {
+              id: form.id,
+              name: form.fullName || 'Unknown',
+              course: form.college || 'Unknown',
+              year: yearDisplay, // FIXED: Use proper year format
+              type: isReferral ? 'Referral' : (form.selectedMode || 'Walk-in'),
+              referral: isReferral ? (form.referredBy || form.referral || 'Faculty') : (form.referral || 'Self'),
+              remarks: form.remarks || '',
+              status: form.status || 'Pending',
+              isReferral: isReferral,
+              dateTime: form.submissionDate || new Date().toISOString(),
+              followUpDate: form.followUpDate,
+              details: {
+                mode: isReferral ? 'Referral' : (form.selectedMode || 'Walk-in'),
+                fullName: form.fullName || (isReferral ? form.clientName : 'Unknown'),
+                email: form.email || 'Unknown',
+                // FIXED: Properly format course/year for details
+                courseYear: form.college ? 
+                  `${form.college}${form.year ? ` - Year ${form.year}${form.section ? ` Section ${form.section}` : ''}` : ''}` : 
+                  (isReferral ? form.courseYear : 'Unknown'),
+                department: form.college || 'Unknown Department',
+                id: form.uicId || (isReferral ? form.userId : 'Unknown'),
+                dob: form.dob || 'Unknown',
+                ageSex: `${form.age || 'Unknown'} / ${form.sex || 'Unknown'}`,
+                contact: form.contact || 'Unknown',
+                address: form.address || 'Unknown',
+                emergencyContact: `${form.emergencyContact || 'Unknown'}`,
+                date: form.selectedDate || form.date || 'Unknown',
+                time: form.selectedTime || 'Unknown',
+                personal: extractPersonalConcerns(form.personal, isReferral ? form.personalConcerns : null),
+                interpersonal: extractInterpersonalConcerns(form.interpersonal),
+                grief: extractGriefConcerns(form.griefBereavement),
+                academics: extractAcademicConcerns(form.academics, isReferral ? form.academicConcerns : null),
+                family: extractFamilyConcerns(form.family),
+                gettingToKnowYou: form.gettingToKnowYou || {},
+                referredBy: isReferral ? (form.referredBy || 'Faculty') : null,
+                referralRemarks: isReferral ? (form.referralData?.remarks || form.remarks || '') : null
+              }
+            };
+            return processedForm;
+          } else {
+            // Process legacy form submission
+            let course = 'Unknown';
+            let year = 'Unknown';
+  
+            if (form.courseYearSection) {
+              if (form.courseYearSection.includes('-')) {
+                const parts = form.courseYearSection.split('-');
+                course = parts[0] || 'Unknown';
+                if (parts[1]) {
+                  const yearDigits = parts[1].match(/\d+/);
+                  if (yearDigits) {
+                    const yearNum = parseInt(yearDigits[0]);
+                    year = getYearSuffix(yearNum);
+                  }
+                }
+              } else {
+                const parts = form.courseYearSection.split(' ');
+                if (parts.length > 0) {
+                  course = parts[0];
+                  const yearDigits = form.courseYearSection.match(/\d+/);
+                  if (yearDigits) {
+                    const yearNum = parseInt(yearDigits[0]);
+                    year = getYearSuffix(yearNum);
+                  } else if (parts.length > 1) {
+                    year = parts[1];
+                  }
+                }
+              }
+            }
+  
+            return {
+              id: form.id,
+              name: form.studentName || form.name || 'Unknown',
+              course: course,
+              year: year,
+              type: form.type || 'Walk-in',
+              referral: form.referral || 'Self',
+              remarks: form.remarks || '',
+              status: form.status || 'Pending',
+              isReferral: form.isReferral === true,
+              dateTime: form.dateTime || form.submissionDate || new Date().toISOString(),
+              followUpDate: form.followUpDate,
+              details: {
+                mode: form.isReferral === true ? 'Referral' : 'Non-Referral',
+                fullName: form.studentName || form.name || 'Unknown',
+                email: form.email || 'Unknown',
+                courseYear: form.courseYearSection || 'Unknown',
+                department: getDepartmentFromCourse(course),
+                id: form.studentId || form.id || '2200000321',
+                dob: form.dateOfBirth || 'Unknown',
+                ageSex: form.ageSex || 'Unknown',
+                contact: form.contactNo || 'Unknown',
+                address: form.presentAddress || 'Unknown',
+                emergencyContact: `${form.emergencyContactPerson || 'Unknown'} - ${form.emergencyContactNo || 'Unknown'}`,
+                date: form.dateTime ? new Date(form.dateTime).toLocaleDateString() : 'Unknown',
+                time: form.dateTime ? new Date(form.dateTime).toLocaleTimeString() : 'Unknown',
+                personal: mapConcernAreasToText(form.areasOfConcern?.personal, 'personal'),
+                interpersonal: mapConcernAreasToText(form.areasOfConcern?.interpersonal, 'interpersonal'),
+                grief: ['None'],
+                academics: mapConcernAreasToText(form.areasOfConcern?.academic, 'academic'),
+                family: mapConcernAreasToText(form.areasOfConcern?.family, 'family'),
+              }
+            };
+          }
+        });
+  
+        // Initialize dropdown values
+        const initialDropdownValues = {};
+      processedForms.forEach(form => {
+        initialDropdownValues[form.id] = '';
+      });
+      setDropdownValues(initialDropdownValues);
+
+      setForms(processedForms);
+      console.log("Forms ready for display:", processedForms.length);
+
+    } else {
+      setError("Failed to fetch forms. Please try again.");
+      toast.error("Failed to fetch forms. Please try again.");
+    }
+  } catch (error) {
+    console.error("Error fetching forms:", error);
+    setError("An error occurred while fetching forms.");
+    toast.error("An error occurred while fetching forms: " + error.message);
+  } finally {
+    setLoading(false);
+  }
+};
+  
+
+  // When Follow-up is selected from dropdown
+  const handleFollowUpSelection = (formId) => {
+    setCurrentFormId(formId);
+    setShowFollowUpScheduler(true);
+  };
+
+  // When follow-up is scheduled
+  const handleFollowUpScheduled = (date, time) => {
+    handleRemarkChange(currentFormId, 'Follow up', date, '', false, time);
+    setShowFollowUpScheduler(false);
+    setCurrentFormId(null);
+  };
+
+  // Helper function to determine department from course code
+  const getDepartmentFromCourse = (courseCode) => {
+    const programCode = courseCode.split(' ')[0];
+    
+    const collegeMap = {
+      'BSA': 'College of Accounting and Business Education',
+      'BSMA': 'College of Accounting and Business Education',
+      'BSAIS': 'College of Accounting and Business Education',
+      'BSBA': 'College of Accounting and Business Education',
+      'BSREM': 'College of Accounting and Business Education',
+      'AB': 'College of Arts and Humanities',
+      'ABCOM': 'College of Arts and Humanities',
+      'ABELS': 'College of Arts and Humanities',
+      'ABPhilo': 'College of Arts and Humanities',
+      'ABPsych': 'College of Arts and Humanities',
+      'BSCS': 'College of Computer Studies',
+      'BSIS': 'College of Computer Studies',
+      'BSIT': 'College of Computer Studies',
+      'BSArch': 'College of Engineering and Architecture',
+      'BSCE': 'College of Engineering and Architecture',
+      'BSCpE': 'College of Engineering and Architecture',
+      'BSECE': 'College of Engineering and Architecture',
+      'BSND': 'College of Human Environmental Sciences and Food Studies',
+      'BSHRM': 'College of Human Environmental Sciences and Food Studies',
+      'BSTM': 'College of Human Environmental Sciences and Food Studies',
+      'BSBio': 'College of Medical and Biological Science',
+      'BSMLS': 'College of Medical and Biological Science',
+      'BM': 'College of Music',
+      'BSN': 'College of Nursing',
+      'BSP': 'College of Pharmacy and Chemistry',
+      'BSChem': 'College of Pharmacy and Chemistry',
+      'BECE': 'College of Teacher Education',
+      'BEEd': 'College of Teacher Education',
+      'BSEd': 'College of Teacher Education',
+      'BSNE': 'College of Teacher Education',
+      'BPE': 'College of Teacher Education',
+    };
+
+    if (collegeMap[programCode]) {
+      return collegeMap[programCode];
+    }
+    
+    for (const prefix in collegeMap) {
+      if (programCode.startsWith(prefix)) {
+        return collegeMap[prefix];
+      }
+    }
+
+    if (programCode.includes('BA') || programCode.includes('Acct') || programCode.includes('Fin') || 
+        programCode.includes('Mgt') || programCode.includes('HRM')) {
+      return 'College of Accounting and Business Education';
+    } else if (programCode.includes('Arch') || programCode.includes('CE') || 
+              programCode.includes('CpE') || programCode.includes('ECE')) {
+      return 'College of Engineering and Architecture';
+    } else if (programCode.includes('Ed') || programCode.includes('Edu') || programCode.includes('Teach')) {
+      return 'College of Teacher Education';
+    } else if (programCode.includes('CS') || programCode.includes('IS') || programCode.includes('IT')) {
+      return 'College of Computer Studies';
+    } else if (programCode.includes('Nurs')) {
+      return 'College of Nursing';
+    } else if (programCode.includes('Pharm') || programCode.includes('Chem')) {
+      return 'College of Pharmacy and Chemistry';
+    } else if (programCode.includes('Bio') || programCode.includes('MLS') || programCode.includes('Lab')) {
+      return 'College of Medical and Biological Science';
+    } else if (programCode.includes('ND') || programCode.includes('HRM') || programCode.includes('TM')) {
+      return 'College of Human Environmental Sciences and Food Studies';
+    } else if (programCode.includes('AB') || programCode.includes('Arts') || 
+              programCode.includes('Com') || programCode.includes('Psych') || 
+              programCode.includes('Phil')) {
+      return 'College of Arts and Humanities';
+    } else if (programCode.includes('Mus') || programCode.includes('BM')) {
+      return 'College of Music';
+    }
+
+    return 'Unknown College';
+  };
+
   const openModal = (student) => {
+    console.log("Opening modal for student:", student);
     setSelectedStudent(student);
     setIsModalOpen(true);
   };
@@ -302,8 +615,7 @@ const getDepartmentFromCourse = (courseCode) => {
   };
 
   // Handler for when a remark is selected
- // Update handleRemarkChange in SubmittedFormsManagement
-// Update handleRemarkChange in SubmittedFormsManagement
+  // Update handleRemarkChange in SubmittedFormsManagement
 const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessionNotes = '', isDropdownChangeOnly = false, followUpTime = null) => {
   // Add debugging logs
   console.log("handleRemarkChange called with:", { formId, newRemark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime });
@@ -314,6 +626,12 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
       ...prev,
       [formId]: newRemark
     }));
+    
+    // If Follow up is selected, show the follow-up scheduler
+    if (newRemark === 'Follow up') {
+      handleFollowUpSelection(formId);
+    }
+    
     return;
   }
 
@@ -324,16 +642,24 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
     const currentForm = forms.find(form => form.id === formId);
     
     // STAGE 1: Initial Confirmation (change status to Confirmed)
-    if (newRemark === 'Confirmed' && (!currentForm.status || currentForm.status === 'Pending')) {
+    if (newRemark === 'Confirmed' || (isInitialConfirmation && !newRemark)) {
       const additionalData = {
         status: 'Confirmed',
         confirmedAt: new Date().toISOString()
       };
+      const userIdCheck = await verifyUserIdInForm(formId);
+      console.log("User ID check result:", userIdCheck);
+      
+      if (!userIdCheck.success || !userIdCheck.hasUserId) {
+        toast.error("Cannot send notification: No user ID found in the form");
+        // You might want to continue anyway, or stop here
+      }
       
       if (sessionNotes && sessionNotes.trim() !== '') {
         additionalData.sessionNotes = sessionNotes;
       }
       
+      console.log("Confirming appointment with data:", additionalData);
       const result = await updateFormStatus(formId, 'Confirmed', null, additionalData);
       
       if (result.success) {
@@ -357,6 +683,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
           closeModal();
         }
       } else {
+        console.error("Error confirming appointment:", result);
         toast.error("Failed to confirm appointment: " + (result.error || "Unknown error"));
       }
     }
@@ -379,14 +706,11 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
       
       console.log("Proceeding with follow-up, date:", followUpDate, "time:", followUpTime);
       
-      // Combine date and time into a single datetime string
-      const followUpDateTime = `${followUpDate}T${followUpTime}`;
-      
       // Create an object with additional data to pass to updateFormStatus
       const additionalData = {
         followUpDate: followUpDate,
         followUpTime: followUpTime,
-        followUpDateTime: followUpDateTime,
+        followUpDateTime: `${followUpDate}T${followUpTime}`,
         status: 'Confirmed', // Automatically confirm the follow-up
         remarks: newRemark,
         isFollowUp: true,
@@ -398,7 +722,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
       }
       
       // Update the form with remark and additional data
-      // We're not moving it to history, so pass null as the status
+      console.log("Scheduling follow-up with data:", additionalData);
       const result = await updateFormStatus(formId, null, newRemark, additionalData);
       
       if (result.success) {
@@ -410,7 +734,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
                 remarks: newRemark,
                 followUpDate: followUpDate,
                 followUpTime: followUpTime,
-                followUpDateTime: followUpDateTime,
+                followUpDateTime: `${followUpDate}T${followUpTime}`,
                 status: 'Confirmed', // Update status to Confirmed
                 sessionNotes: sessionNotes || form.sessionNotes
               } 
@@ -436,6 +760,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
           closeModal();
         }
       } else {
+        console.error("Error scheduling follow-up:", result);
         toast.error("Failed to schedule follow-up: " + (result.error || "Unknown error"));
       }
     } 
@@ -448,6 +773,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
         additionalData.sessionNotes = sessionNotes;
       }
       
+      console.log("Completing session with remark:", newRemark);
       const result = await updateFormStatus(formId, 'Completed', newRemark, additionalData);
       
       if (result.success) {
@@ -470,6 +796,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
           closeModal();
         }
       } else {
+        console.error("Error completing session:", result);
         toast.error("Failed to update status: " + (result.error || "Unknown error"));
       }
     }
@@ -503,7 +830,6 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
     <div className="min-h-screen bg-white">
       <AdminNavbar />
       
-      {/* Toast Container */}
       <ToastContainer
         position="top-right"
         autoClose={3000}
@@ -550,39 +876,28 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
                 nonReferralForms.map((student) => (
                   <tr
                     key={student.id}
-                    className="border-b hover:bg-gray-200"
+                    className="border-b hover:bg-gray-200 cursor-pointer"
+                    onClick={() => openModal(student)}
                   >
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.name}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.course}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.year}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.type}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.referral}
-                    </td>
-                    <td className="py-3 px-4">
+                    <td className="py-3 px-4">{student.name}</td>
+                    <td className="py-3 px-4">{student.course}</td>
+                    <td className="py-3 px-4">{student.year}</td>
+                    <td className="py-3 px-4">{student.type}</td>
+                    <td className="py-3 px-4">{student.referral}</td>
+                    <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                       <select
                         value={dropdownValues[student.id] || ''}
                         onChange={(e) => {
+                          e.stopPropagation();
                           if (e.target.value) {
-                            // Update dropdown value first
                             setDropdownValues(prev => ({
                               ...prev,
                               [student.id]: e.target.value
                             }));
-                            // Then process the change
-                            handleRemarkChange(student.id, e.target.value);
+                            handleRemarkChange(student.id, e.target.value, null, null, true);
                           }
                         }}
                         className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                        onClick={(e) => e.stopPropagation()}
                         disabled={updatingId === student.id}
                       >
                         <option value="">Select Remarks</option>
@@ -608,99 +923,92 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
       </div>
 
       <div className="max-w-8xl mx-auto px-6 pt-12">
-        <h1 className="text-2xl font-bold mb-6">Non-Referral</h1>
-        <div className="bg-white shadow-md rounded-lg overflow-hidden">
-          <table className="min-w-full bg-white">
-          <thead className="bg-[#3A0323] border-b text-white">
-              <tr>
-                <th className="text-left py-3 px-4">Name</th>
-                <th className="text-left py-3 px-4">Course</th>
-                <th className="text-left py-3 px-4">Year</th>
-                <th className="text-left py-3 px-4">Type</th>
-                <th className="text-left py-3 px-4">Referral</th>
-                <th className="text-left py-3 px-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {referralForms.length > 0 ? (
-                referralForms.map((student) => (
-                  <tr
-                    key={student.id}
-                    className="border-b hover:bg-gray-200"
-                  >
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.name}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.course}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.year}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.type}
-                    </td>
-                    <td className="py-3 px-4 cursor-pointer" onClick={() => openModal(student)}>
-                      {student.referral}
-                    </td>
-                    <td className="py-3 px-4">
-                    <select
-                        value={dropdownValues[student.id] || ''}
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            // Update dropdown value first
-                            setDropdownValues(prev => ({
-                              ...prev,
-                              [student.id]: e.target.value
-                            }));
-                            
-                            // Don't immediately process the change for the dropdown in the table
-                            // Only update the dropdown value, not the actual form
-                            handleRemarkChange(student.id, e.target.value, null, null, true);
-                          }
-                        }}
-                        className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                        onClick={(e) => e.stopPropagation()}
-                        disabled={updatingId === student.id}
-                      >
-                        <option value="">Select Remarks</option>
-                        <option value="Attended">Attended</option>
-                        <option value="No Show">No Show</option>
-                        <option value="No Response">No Response</option>
-                        <option value="Terminated">Terminated</option>
-                        <option value="Follow up">Follow-up</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="6" className="py-4 text-center text-gray-500">
-                    No referral submissions found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+  <h1 className="text-2xl font-bold mb-6">Referral</h1>
+  <div className="bg-white shadow-md rounded-lg overflow-hidden">
+    <table className="min-w-full bg-white">
+      <thead className="bg-[#3A0323] border-b text-white">
+        <tr>
+          <th className="text-left py-3 px-4">Name</th>
+          <th className="text-left py-3 px-4">Course</th>
+          <th className="text-left py-3 px-4">Year</th>
+          <th className="text-left py-3 px-4">Type</th>
+          <th className="text-left py-3 px-4">Referral</th>
+          <th className="text-left py-3 px-4">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {referralForms.length > 0 ? (
+          referralForms.map((student) => (
+            <tr
+              key={student.id}
+              className="border-b hover:bg-gray-200 cursor-pointer"
+              onClick={() => openReferralModal(student)}
+            >
+              <td className="py-3 px-4">{student.name}</td>
+              <td className="py-3 px-4">{student.course}</td>
+              <td className="py-3 px-4">{student.year}</td>
+              <td className="py-3 px-4">{student.type}</td>
+              <td className="py-3 px-4">{student.referral}</td>
+              <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                <select
+                  value={dropdownValues[student.id] || ''}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    if (e.target.value) {
+                      setDropdownValues(prev => ({
+                        ...prev,
+                        [student.id]: e.target.value
+                      }));
+                      handleRemarkChange(student.id, e.target.value, null, null, true);
+                    }
+                  }}
+                  className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  disabled={updatingId === student.id}
+                >
+                  <option value="">Select Remarks</option>
+                  <option value="Attended">Attended</option>
+                  <option value="No Show">No Show</option>
+                  <option value="No Response">No Response</option>
+                  <option value="Terminated">Terminated</option>
+                  <option value="Follow up">Follow-up</option>
+                </select>
+              </td>
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td colSpan="6" className="py-4 text-center text-gray-500">
+              No referral submissions found
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+</div>
       
       {/* Student Details Modal */}
-{isModalOpen && selectedStudent && (
-  <StudentDetailsModal
-    student={selectedStudent}
-    onClose={closeModal}
-    handleRemarkChange={(formId, remark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime) => {
-      // Make sure all parameters are passed through
-      handleRemarkChange(formId, remark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime);
-    }}
-    updatingId={updatingId}
-    dropdownValue={dropdownValues[selectedStudent.id] || ''}
-  />
-)}
+      {isModalOpen && selectedStudent && (
+        <StudentDetailsModal
+          student={selectedStudent}
+          onClose={closeModal}
+          handleRemarkChange={(formId, remark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime) => {
+            // Make sure all parameters are passed through
+            handleRemarkChange(formId, remark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime);
+          }}
+          updatingId={updatingId}
+          dropdownValue={dropdownValues[selectedStudent.id] || ''}
+        />
+      )}
+      {isReferralModalOpen && selectedReferral && (
+        <ReferralModal 
+          referral={selectedReferral} 
+          onClose={() => setIsReferralModalOpen(false)} 
+        />
+      )}
 
-{/* Follow-up Scheduler Modal */}
-{showFollowUpScheduler && (
+      {/* Follow-up Scheduler Modal */}
+      {showFollowUpScheduler && (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
     <div className="bg-white w-96 rounded-lg shadow-lg p-6 relative">
       <button
@@ -758,10 +1066,8 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
       </div>
     </div>
   </div>
-)}
-</div>
-
-    
+)}      
+    </div>
   );
 }
 

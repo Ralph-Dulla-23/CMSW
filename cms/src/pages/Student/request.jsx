@@ -1,6 +1,6 @@
 import React, { useState, useEffect, forwardRef } from "react"; // Add forwardRef import here
 import { useNavigate } from "react-router-dom";
-import StudentNavbar from "../ui/studentnavbar";
+import StudentNavbar from "../ui/Studentnavbar";
 import { submitStudentInterviewForm, getUnavailableDates } from '../../firebase/firestoreService';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
@@ -168,7 +168,6 @@ const nextStep = () => {
           console.log("Date is unavailable, staying on step 1");
           return;
       }
-      
       // Clear any previous errors
       setDateError('');
       setError(null);
