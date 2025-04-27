@@ -107,10 +107,14 @@ function History() {
   };
 
   // Get student name consistently
-  const getStudentName = (session) => {
-    return session.studentName || session.fullName || session.name || "Student";
-  };
-
+  // Get student name consistently
+const getStudentName = (session) => {
+  return session.studentName || 
+         session.fullName || 
+         session.name || 
+         session.clientName || // Add this for referrals
+         "Student";
+};
   // Updated to extract course and year consistently with other components
   const extractCourseAndYearSection = (session) => {
     // If this is a mobile submission
@@ -241,6 +245,15 @@ function History() {
       family: [],
       grief: []
     };
+    
+    // Handle direct referral concerns
+    if (Array.isArray(session.personalConcerns)) {
+      concerns.personal = session.personalConcerns;
+    }
+    
+    if (Array.isArray(session.academicConcerns)) {
+      concerns.academic = session.academicConcerns;
+    }
     
     // Handle direct academic concerns structure
     if (session.academics) {
@@ -579,75 +592,77 @@ function History() {
 
       {/* Modal */}
       {isModalOpen && selectedStudent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white w-11/12 max-w-4xl rounded-lg shadow-lg p-6 relative max-h-[90vh] overflow-y-auto">
-            <button
-              onClick={closeModal}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-            >
-              <span className="sr-only">Close</span>
-              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            
-            <h1 className="text-2xl font-bold mb-4 text-[#3A0323]">Session Details</h1>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div>
-                <p><strong>Mode of Counseling:</strong> {getSessionType(selectedStudent)}</p>
-                <p><strong>Full name:</strong> {getStudentName(selectedStudent)}</p>
-                <p><strong>Email Address:</strong> {selectedStudent.email || "N/A"}</p>
-                <p><strong>College Department & Course & Year:</strong> {
-                  // Prioritize directly stored college/year/section
-                  selectedStudent.college ? 
-                    `${selectedStudent.college}${selectedStudent.year ? 
-                      ` - Year ${selectedStudent.year}${selectedStudent.section ? ` Section ${selectedStudent.section}` : ''}` : 
-                      ''}` : 
-                    // Fall back to courseYearSection
-                    selectedStudent.courseYearSection || "N/A"
-                }</p>
-                
-              </div>
-              
-              <div>
-                <p><strong>ID:</strong> {selectedStudent.studentId || selectedStudent.uicId || "N/A"}</p>
-                <p><strong>Date of Birth:</strong> {formatDate(selectedStudent.dateOfBirth || selectedStudent.dob) || "N/A"}</p>
-                <p><strong>Age/Sex:</strong> {
-                  selectedStudent.ageSex || 
-                  (selectedStudent.age && selectedStudent.sex ? 
-                    `${selectedStudent.age} / ${selectedStudent.sex}` : 
-                    (selectedStudent.age ? `${selectedStudent.age} / Unknown` : "N/A"))
-                }</p>
-                <p><strong>Contact No.:</strong> {selectedStudent.contactNo || selectedStudent.contact || "N/A"}</p>
-                <p><strong>Present Address:</strong> {selectedStudent.presentAddress || selectedStudent.address || "N/A"}</p>
-                <p><strong>Emergency contact:</strong> {
-                  selectedStudent.emergencyContactPerson && selectedStudent.emergencyContactNo ? 
-                    `${selectedStudent.emergencyContactPerson} - ${selectedStudent.emergencyContactNo}` : 
-                    (selectedStudent.emergencyContact ? 
-                      `${selectedStudent.emergencyContact}${selectedStudent.emergencyContactNo ? ` - ${selectedStudent.emergencyContactNo}` : ''}` : 
-                      "N/A")
-                }</p>
-                <p><strong>Date:</strong> {
-                  // Try different date fields
-                  selectedStudent.scheduledDate ? formatDate(selectedStudent.scheduledDate) :
-                  selectedStudent.selectedDate ? formatDate(selectedStudent.selectedDate) :
-                  selectedStudent.date ? formatDate(selectedStudent.date) :
-                  selectedStudent.submissionDate ? formatDate(selectedStudent.submissionDate) :
-                  selectedStudent.dateTime ? formatDate(selectedStudent.dateTime) :
-                  "N/A"
-                }</p>
-                <p><strong>Time:</strong> {
-                  // Try different time fields
-                  selectedStudent.scheduledTime ? selectedStudent.scheduledTime :
-                  selectedStudent.selectedTime ? selectedStudent.selectedTime :
-                  selectedStudent.time ? selectedStudent.time :
-                  (selectedStudent.submissionDate ? formatTime(selectedStudent.submissionDate) :
-                  selectedStudent.dateTime ? formatTime(selectedStudent.dateTime) :
-                  "N/A")
-                }</p>
-              </div>
-            </div>
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+    <div className="bg-white w-11/12 max-w-4xl rounded-lg shadow-lg p-6 relative max-h-[90vh] overflow-y-auto">
+      {/* Close button */}
+      <button
+        onClick={closeModal}
+        className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+      >
+        <span className="sr-only">Close</span>
+        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+      
+      <h1 className="text-2xl font-bold mb-4 text-[#3A0323]">Session Details</h1>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div>
+          <p><strong>Mode of Counseling:</strong> {getSessionType(selectedStudent)}</p>
+          <p><strong>Full name:</strong> {getStudentName(selectedStudent)}</p>
+          <p><strong>Email Address:</strong> {selectedStudent.email || selectedStudent.details?.email || "N/A"}</p>
+          <p><strong>College Department & Course & Year:</strong> {
+            // Prioritize directly stored college/year/section
+            selectedStudent.college ? 
+              `${selectedStudent.college}${selectedStudent.year ? 
+                ` - Year ${selectedStudent.year}${selectedStudent.section ? ` Section ${selectedStudent.section}` : ''}` : 
+                ''}` : 
+              // Try courseYear for referrals
+              (selectedStudent.courseYear || 
+              // Fall back to courseYearSection
+              selectedStudent.courseYearSection || "N/A")
+          }</p>
+        </div>
+        
+        <div>
+          <p><strong>ID:</strong> {selectedStudent.studentId || selectedStudent.uicId || "N/A"}</p>
+          <p><strong>Date of Birth:</strong> {formatDate(selectedStudent.dateOfBirth || selectedStudent.dob) || "N/A"}</p>
+          <p><strong>Age/Sex:</strong> {
+            selectedStudent.ageSex || 
+            (selectedStudent.age && selectedStudent.sex ? 
+              `${selectedStudent.age} / ${selectedStudent.sex}` : 
+              (selectedStudent.age ? `${selectedStudent.age} / Unknown` : "N/A"))
+          }</p>
+          <p><strong>Contact No.:</strong> {selectedStudent.contactNo || selectedStudent.contact || "N/A"}</p>
+          <p><strong>Present Address:</strong> {selectedStudent.presentAddress || selectedStudent.address || "N/A"}</p>
+          <p><strong>Emergency contact:</strong> {
+            selectedStudent.emergencyContactPerson && selectedStudent.emergencyContactNo ? 
+              `${selectedStudent.emergencyContactPerson} - ${selectedStudent.emergencyContactNo}` : 
+              (selectedStudent.emergencyContact ? 
+                `${selectedStudent.emergencyContact}${selectedStudent.emergencyContactNo ? ` - ${selectedStudent.emergencyContactNo}` : ''}` : 
+                "N/A")
+          }</p>
+          <p><strong>Date:</strong> {
+            // Try different date fields
+            selectedStudent.scheduledDate ? formatDate(selectedStudent.scheduledDate) :
+            selectedStudent.selectedDate ? formatDate(selectedStudent.selectedDate) :
+            selectedStudent.date ? formatDate(selectedStudent.date) :
+            selectedStudent.submissionDate ? formatDate(selectedStudent.submissionDate) :
+            selectedStudent.dateTime ? formatDate(selectedStudent.dateTime) :
+            "N/A"
+          }</p>
+          <p><strong>Time:</strong> {
+            // Try different time fields
+            selectedStudent.scheduledTime ? selectedStudent.scheduledTime :
+            selectedStudent.selectedTime ? selectedStudent.selectedTime :
+            selectedStudent.time ? selectedStudent.time :
+            (selectedStudent.submissionDate ? formatTime(selectedStudent.submissionDate) :
+            selectedStudent.dateTime ? formatTime(selectedStudent.dateTime) :
+            "N/A")
+          }</p>
+        </div>
+      </div>
                   
             <div className="border-t pt-4">
               <h2 className="text-xl font-bold mb-2 text-[#3A0323]">Areas of Concern</h2>
