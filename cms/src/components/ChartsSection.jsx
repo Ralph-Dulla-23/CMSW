@@ -60,7 +60,23 @@ const ChartCard = ({ title, type, data, options, className = '' }) => {
   // Create custom options based on chart type
   const getCustomOptions = () => {
     // Start with the base options
-    const customOptions = { ...options };
+    const customOptions = { 
+      ...options,
+      maintainAspectRatio: false,
+      responsive: true,
+      plugins: {
+        ...(options?.plugins || {}),
+        legend: {
+          position: 'right',
+          labels: {
+            boxWidth: 12,
+            font: {
+              size: 10
+            }
+          }
+        }
+      }
+    };
     
     // For pie charts, customize the tooltip to show percentages
     if (type === 'pie' || type === 'doughnut') {
@@ -108,23 +124,69 @@ const ChartCard = ({ title, type, data, options, className = '' }) => {
           }
         }
       };
+      
+      // Add custom scales for bar charts
+      if (type === 'bar') {
+        customOptions.scales = {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0 // Show only whole numbers
+            }
+          }
+        };
+      }
     }
     
     return customOptions;
   };
 
+  // Check if data is valid and has content
+  const hasValidData = () => {
+    if (!data || !data.labels || !data.datasets) return false;
+    
+    // Check if there are any non-zero values
+    if (data.datasets.length === 0) return false;
+    
+    const hasNonZeroValues = data.datasets.some(dataset => 
+      dataset.data && dataset.data.some(value => value > 0)
+    );
+    
+    return data.labels.length > 0 && hasNonZeroValues;
+  };
+
   return (
     <div className={`bg-white border p-4 rounded-lg shadow-md mx-2 ${className}`}>
-      <h2 className="text-lg font-semibold mb-2">{title}</h2>
-      {data && data.labels && data.labels.length > 0 && data.datasets && data.datasets.length > 0 ? (
-        <Chart 
-          type={type} 
-          data={data} 
-          options={getCustomOptions()} 
-          style={{ width: '100%', height: '200px' }} 
-        />
+      <h2 className="text-lg font-semibold mb-2 text-[#3A0323]">{title}</h2>
+      {hasValidData() ? (
+        <div className="h-[250px]">
+          <Chart 
+            type={type} 
+            data={data} 
+            options={getCustomOptions()} 
+            style={{ width: '100%', height: '100%' }} 
+          />
+        </div>
       ) : (
-        <div className="flex justify-center items-center h-[200px] text-gray-500">No data available</div>
+        <div className="flex justify-center items-center h-[250px] text-gray-500 bg-gray-50 rounded">
+          <div className="text-center">
+            <svg 
+              xmlns="http://www.w3.org/2000/svg" 
+              className="h-10 w-10 mx-auto text-gray-400 mb-2" 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={1.5} 
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" 
+              />
+            </svg>
+            <p>No data available for this timeframe</p>
+          </div>
+        </div>
       )}
     </div>
   );

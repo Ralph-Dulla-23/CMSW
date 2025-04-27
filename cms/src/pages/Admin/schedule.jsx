@@ -5,6 +5,7 @@ import {
   getUnavailableDates,
   setUnavailableDates,
   removeUnavailableDates,
+  getReferrals  // Add this import
 } from '../../firebase/firestoreService';
 import UnavailableDatesModal from '../ui/UnavailableDatesModal.jsx';
 import {
@@ -18,6 +19,7 @@ import {
   isToday,
   getDay,
   isSameDay,
+  parseISO,
 } from 'date-fns';
 
 import { ToastContainer, toast } from 'react-toastify';
@@ -37,6 +39,8 @@ function Schedule() {
   const [unavailableReason, setUnavailableReason] = useState('');
   const [unavailableMode, setUnavailableMode] = useState('add'); // 'add' or 'remove'
   const [processingUnavailable, setProcessingUnavailable] = useState(false);
+  const [renderKey, setRenderKey] = useState(0); // Used to force re-renders
+  
   const isValidDate = (date) => {
     return date instanceof Date && !isNaN(date.getTime());
   };
@@ -59,26 +63,199 @@ function Schedule() {
       setLoading(true);
       setError(null);
       
-      const result = await getStudentInterviewForms();
+      // Fetch both regular forms and referrals concurrently
+      const [regularFormsResult, referralsResult] = await Promise.all([
+        getStudentInterviewForms(),
+        getReferrals()
+      ]);
       
-      if (!result.success) {
-        setError(result.error || "Failed to fetch sessions");
-        toast.error("Failed to fetch sessions. Please try again.");
-        return;
+      // Initialize array for processed sessions
+      const processedSessions = [];
+      
+      // Process regular forms
+      if (regularFormsResult.success) {
+        const forms = regularFormsResult.forms || [];
+        console.log(`Processing ${forms.length} regular forms`);
+        
+        for (const form of forms) {
+          try {
+            // Extract name with fallbacks
+            const name = form.fullName || form.clientName || form.studentName || form.name || 'Unknown';
+            
+            // Extract college/department with fallbacks
+            const college = form.college || form.department || '';
+            
+            // Extract year and section with proper formatting
+            let yearSection = '';
+            if (form.year) {
+              yearSection = `Year ${form.year}${form.section ? ` Section ${form.section}` : ''}`;
+            } else if (form.courseYearSection) {
+              // Try to extract year from courseYearSection
+              const match = form.courseYearSection.match(/Year\s+(\d+)(?:\s+Section\s+([A-Z]))?/i);
+              if (match) {
+                yearSection = `Year ${match[1]}${match[2] ? ` Section ${match[2]}` : ''}`;
+              } else if (form.courseYearSection.includes('-')) {
+                // Try to extract from format like "BSCS - Year 2"
+                const parts = form.courseYearSection.split('-');
+                if (parts.length > 1) {
+                  yearSection = parts[1].trim();
+                }
+              }
+            }
+            
+            // Determine the appropriate appointment date with validation
+            let appointmentDate = null;
+            if (form.remarks === 'Follow up' && form.followUpDate) {
+              appointmentDate = new Date(form.followUpDate);
+            } else if (form.appointmentDate) {
+              appointmentDate = new Date(form.appointmentDate);
+            } else if (form.scheduledDate) {
+              appointmentDate = new Date(form.scheduledDate);
+            } else if (form.selectedDate) {
+              appointmentDate = new Date(form.selectedDate);
+            } else if (form.dateTime) {
+              appointmentDate = new Date(form.dateTime);
+            } else if (form.submissionDate) {
+              appointmentDate = new Date(form.submissionDate);
+            } else if (form.date) {
+              appointmentDate = new Date(form.date);
+            }
+            
+            // Validate the date is valid
+            if (!appointmentDate || isNaN(appointmentDate.getTime())) {
+              console.log(`Skipping regular form ${form.id} - invalid or missing date`);
+              continue; // Skip this form
+            }
+            
+            // Determine the appropriate appointment time
+            let appointmentTime = '';
+            if (form.remarks === 'Follow up' && form.followUpTime) {
+              appointmentTime = form.followUpTime;
+            } else if (form.scheduledTime) {
+              appointmentTime = form.scheduledTime;
+            } else if (form.selectedTime) {
+              appointmentTime = form.selectedTime;
+            } else if (form.time) {
+              appointmentTime = form.time;
+            } else if (form.dateTime) {
+              try {
+                appointmentTime = format(new Date(form.dateTime), 'h:mm a');
+              } catch (e) {
+                console.error("Error formatting dateTime:", e);
+              }
+            }
+            
+            // Add the processed session
+            processedSessions.push({
+              id: form.id,
+              ...form,
+              name,
+              college,
+              yearSection,
+              appointmentDate,
+              appointmentTime,
+              isReferral: form.isReferral === true,
+              status: form.status || 'Pending',
+              remarks: form.remarks || '',
+              type: form.selectedMode || form.type || 'Walk-in'
+            });
+            
+            console.log(`Processed regular form: ${form.id}, date: ${appointmentDate.toISOString()}`);
+          } catch (processError) {
+            console.error("Error processing regular form:", processError, form);
+          }
+        }
+        
+        console.log(`Successfully processed ${processedSessions.length} regular forms`);
+      } else {
+        console.error("Failed to fetch regular forms:", regularFormsResult.error);
       }
       
-      const forms = result.forms || [];
+      // Process referrals
+      if (referralsResult && referralsResult.success) {
+        const referrals = referralsResult.referrals || [];
+        console.log(`Processing ${referrals.length} referrals`);
+        
+        for (const referral of referrals) {
+          try {
+            // Skip completed referrals
+            if (referral.status === 'Completed') {
+              console.log(`Skipping completed referral: ${referral.id}`);
+              continue;
+            }
+            
+            // Extract name with fallbacks
+            const name = referral.name || referral.clientName || 'Unknown';
+            
+            // Extract college/department with fallbacks
+            const college = referral.course || referral.college || '';
+            
+            // Extract year and section
+            const yearSection = referral.year || '';
+            
+            // Process appointment date for referrals
+            let appointmentDate = null;
+            
+            // Try different date fields that might be in the referral
+            if (referral.date) {
+              appointmentDate = new Date(referral.date);
+            } else if (referral.appointmentDate) {
+              appointmentDate = new Date(referral.appointmentDate);
+            } else if (referral.scheduledDate) {
+              appointmentDate = new Date(referral.scheduledDate);
+            } else if (referral.selectedDate) {
+              appointmentDate = new Date(referral.selectedDate);
+            } else if (referral.dateTime) {
+              appointmentDate = new Date(referral.dateTime);
+            }
+            
+            // Validate the date
+            if (!appointmentDate || isNaN(appointmentDate.getTime())) {
+              console.log(`Skipping referral ${referral.id} - invalid or missing date`);
+              continue;
+            }
+            
+            // Get appointment time
+            let appointmentTime = '';
+            if (referral.time) {
+              appointmentTime = referral.time;
+            } else if (referral.appointmentTime) {
+              appointmentTime = referral.appointmentTime;
+            } else if (referral.scheduledTime) {
+              appointmentTime = referral.scheduledTime;
+            } else if (referral.selectedTime) {
+              appointmentTime = referral.selectedTime;
+            }
+            
+            // Add to processed sessions
+            processedSessions.push({
+              id: referral.id,
+              ...referral,
+              name,
+              college,
+              yearSection,
+              appointmentDate,
+              appointmentTime,
+              isReferral: true,
+              status: referral.status || 'Pending',
+              remarks: referral.remarks || '',
+              type: 'Referral',
+              referral: referral.referral || referral.referredBy || 'Faculty'
+            });
+            
+            console.log(`Processed referral: ${referral.id}, date: ${appointmentDate.toISOString()}`);
+          } catch (processError) {
+            console.error("Error processing referral:", processError, referral);
+          }
+        }
+        
+        console.log(`Total sessions after adding referrals: ${processedSessions.length}`);
+      } else {
+        console.error("Failed to fetch referrals:", referralsResult?.error || "Unknown error");
+      }
       
-      // Filter forms with dateTime, submissionDate, or followUpDate
-      const sessionsData = forms.filter(form => 
-        form.dateTime || form.submissionDate || form.followUpDate
-      );
-      
-      // Log for debugging
-      console.log("All sessions data:", sessionsData);
-      console.log("Sessions with followUpDate:", sessionsData.filter(s => s.followUpDate));
-      
-      setAllSessions(sessionsData);
+      console.log("Final processed sessions:", processedSessions);
+      setAllSessions(processedSessions);
       
       // Initially filter by current date
       filterSessionsByDate(date);
@@ -122,7 +299,6 @@ function Schedule() {
     }
   };
 
- 
   const formatSafely = (date, formatString) => {
     try {
       if (!isValidDate(date)) {
@@ -136,7 +312,7 @@ function Schedule() {
     }
   };
   
-  // Then modify your isDateUnavailable function
+  // Improved isDateUnavailable function
   const isDateUnavailable = (day) => {
     if (!day || !isValidDate(day)) return false;
     if (!Array.isArray(unavailableDates) || unavailableDates.length === 0) return false;
@@ -205,6 +381,57 @@ function Schedule() {
     }
   };
 
+  // Add this function to your component
+const formatTimeForDisplay = (time) => {
+  if (!time) return "Time not specified";
+  
+  // If it's already in a reasonable format (like "2:00 PM"), return it
+  if (/^\d{1,2}:\d{2}(?: [AP]M)?$/i.test(time)) {
+    return time;
+  }
+  
+  // Try to parse and format if it's a 24-hour time
+  if (/^\d{1,2}:\d{2}$/.test(time)) {
+    try {
+      // Create a dummy date with the time
+      const dummyDate = new Date();
+      const [hours, minutes] = time.split(':').map(Number);
+      dummyDate.setHours(hours, minutes);
+      return format(dummyDate, 'h:mm a');
+    } catch (e) {
+      console.error("Error formatting time:", e, time);
+      return time; // Return original if parsing fails
+    }
+  }
+  
+  return time;
+};
+
+// Helper function to format dates consistently
+const formatDateForDisplay = (date, formatString = 'MMMM d, yyyy') => {
+  if (!date || !isValidDate(date)) return 'Unknown';
+  
+  try {
+    return format(date, formatString);
+  } catch (error) {
+    console.error("Error formatting date for display:", error, date);
+    return 'Invalid Date';
+  }
+};
+
+// Helper function to safely parse dates from various formats
+const parseDateSafely = (dateValue) => {
+  if (!dateValue) return null;
+  
+  try {
+    const parsedDate = new Date(dateValue);
+    return isValidDate(parsedDate) ? parsedDate : null;
+  } catch (error) {
+    console.error("Error parsing date:", error, dateValue);
+    return null;
+  }
+};
+
   const handleRemoveUnavailable = async () => {
     if (selectedUnavailableDates.length === 0) {
       toast.warning("Please select at least one date to remove");
@@ -236,82 +463,66 @@ function Schedule() {
     }
   };
 
+  // Improved filterSessionsByDate function
   const filterSessionsByDate = (selectedDate) => {
+    if (!selectedDate || !isValidDate(selectedDate)) {
+      console.error("Invalid date provided to filterSessionsByDate:", selectedDate);
+      setSessions([]);
+      return;
+    }
+    
     // Format the selected date as YYYY-MM-DD for comparison
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     console.log("Filtering sessions for date:", dateStr);
     
     // Filter sessions for the selected date
     const filteredSessions = allSessions.filter(session => {
-      // If this is a follow-up session, only show it on the follow-up date
-      if (session.remarks === 'Follow up' && session.followUpDate) {
-        try {
-          const followUpDate = new Date(session.followUpDate);
-          const followUpDateStr = format(followUpDate, 'yyyy-MM-dd');
-          
-          // Only return true if this is the follow-up date
-          return followUpDateStr === dateStr;
-        } catch (e) {
-          console.error("Error parsing followUpDate:", e);
+      try {
+        // Add this safety check
+        if (!session || !session.appointmentDate) {
+          console.log("Skipping session without appointmentDate:", session?.id || "unknown");
           return false;
         }
-      }
-      
-      // For non-follow-up sessions or sessions without a follow-up date set:
-      
-      // Check dateTime field (this will include rescheduled sessions)
-      if (session.dateTime) {
-        try {
-          const sessionDate = new Date(session.dateTime);
-          return format(sessionDate, 'yyyy-MM-dd') === dateStr;
-        } catch (e) {
-          console.error("Error parsing dateTime:", e);
+        
+        if (!isValidDate(session.appointmentDate)) {
+          console.log("Skipping session with invalid appointmentDate:", session.id);
+          return false;
         }
+        
+        const sessionDateStr = format(session.appointmentDate, 'yyyy-MM-dd');
+        return sessionDateStr === dateStr;
+      } catch (error) {
+        console.error("Error filtering session:", error, session);
+        return false;
       }
-      
-      // Check submissionDate field as fallback
-      if (session.submissionDate) {
-        try {
-          const submissionDate = new Date(session.submissionDate);
-          return format(submissionDate, 'yyyy-MM-dd') === dateStr;
-        } catch (e) {
-          console.error("Error parsing submissionDate:", e);
-        }
-      }
-      
-      return false;
     });
     
     console.log(`Found ${filteredSessions.length} sessions for ${dateStr}`);
     setSessions(filteredSessions);
-    setSelectedSession(null); // Reset selected session when date changes
-  };
+    setSelectedSession(null);
+  }
 
   const handleSessionClick = (session) => {
     setSelectedSession(session);
   };
 
+  // Get session time
+  // Get session time
   const getSessionTime = (session) => {
-    if (session.dateTime) {
-      const date = new Date(session.dateTime);
-      return format(date, 'h:mm a');
-    }
-    if (session.submissionDate) {
-      const date = new Date(session.submissionDate);
-      return format(date, 'h:mm a');
-    }
-    return "Time not specified";
+    return formatTimeForDisplay(session.appointmentTime);
   };
 
+  // Get session type label
   const getSessionTypeLabel = (session) => {
-    // If this is a follow-up session, show it as such
-    if (session.remarks === 'Follow up' || 
-        (session.followUpDate && format(new Date(session.followUpDate), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd'))) {
+    if (session.remarks === 'Follow up') {
       return "Follow-up";
     }
-    if (session.isReferral === true) return "Referral";
-    if (session.type === "Referral") return "Referral";
-    return "Walk-in";
+    
+    if (session.isReferral) {
+      return "Referral";
+    }
+    
+    return session.type || "Walk-in";
   };
 
   const getStatusClass = (status) => {
@@ -325,6 +536,11 @@ function Schedule() {
       case 'Follow up': return 'bg-purple-100 text-purple-800';
       default: return 'bg-yellow-100 text-yellow-800'; // Pending
     }
+  };
+
+  // Get student name consistently
+  const getStudentName = (session) => {
+    return session.name || "Student";
   };
 
   const nextMonth = () => {
@@ -375,6 +591,7 @@ function Schedule() {
       </div>
     );
   };
+  
 
   const renderCells = () => {
     const monthStart = startOfMonth(currentMonth);
@@ -401,29 +618,19 @@ function Schedule() {
       return acc;
     }, {});
     
-    // Helper function to check if a date is unavailable
-    const isDateUnavailable = (day) => {
-      if (!day) return false;
+    // Helper function to check if a date has sessions
+    // Helper function to check if a date has sessions
+    const hasSessionsOnDate = (day) => {
+      if (!day || !isValidDate(day)) return false;
       
-      try {
-        const dayString = format(day, 'yyyy-MM-dd');
+      return allSessions.some(session => {
+        if (!session || !session.appointmentDate || !isValidDate(session.appointmentDate)) {
+          return false;
+        }
         
-        return unavailableDates.some(item => {
-          // Make sure item.date is a valid date before formatting
-          if (!(item.date instanceof Date) || isNaN(item.date.getTime())) {
-            console.log('Invalid date in unavailableDates:', item);
-            return false;
-          }
-          
-          const unavailableDateString = format(item.date, 'yyyy-MM-dd');
-          return dayString === unavailableDateString;
-        });
-      } catch (error) {
-        console.error('Error in isDateUnavailable:', error, 'day:', day);
-        return false; // Return false on error to prevent breaking the UI
-      }
+        return isSameDay(session.appointmentDate, day);
+      });
     };
-    
     
     // Create rows for each week
     Object.values(weeks).forEach((week, weekIndex) => {
@@ -451,43 +658,7 @@ function Schedule() {
         const isCurrentDay = day ? isToday(day) : false;
         const isSelected = day ? isSameDay(day, date) : false;
         const isUnavailable = isDateUnavailable(day);
-        
-        // Check if this day has sessions (including follow-ups)
-        const hasSession = day && allSessions.some(session => {
-          // For follow-up sessions, only show dot on the follow-up date
-          if (session.remarks === 'Follow up' && session.followUpDate) {
-            try {
-              const followUpDate = new Date(session.followUpDate);
-              return isSameDay(followUpDate, day);
-            } catch (e) {
-              console.error("Error parsing followUpDate:", e);
-              return false;
-            }
-          }
-          
-          // For non-follow-up sessions:
-          
-          // Check regular session dates
-          if (session.dateTime) {
-            try {
-              const sessionDate = new Date(session.dateTime);
-              return isSameDay(sessionDate, day);
-            } catch (e) {
-              console.error("Error parsing dateTime:", e);
-            }
-          }
-          
-          if (session.submissionDate) {
-            try {
-              const submissionDate = new Date(session.submissionDate);
-              return isSameDay(submissionDate, day);
-            } catch (e) {
-              console.error("Error parsing submissionDate:", e);
-            }
-          }
-          
-          return false;
-        });
+        const hasSession = hasSessionsOnDate(day);
         
         daysInWeek.push(
           <div
@@ -528,7 +699,7 @@ function Schedule() {
   };
 
   return (
-    <div className="bg-white min-h-screen">
+    <div className="bg-white min-h-screen" key={renderKey}>
       <AdminNavbar />
       
       {/* Toast Container */}
@@ -555,7 +726,7 @@ function Schedule() {
               setUnavailableReason('');
               setUnavailableMode('add');
             }}
-            className="px-4 py-2 bg-[#3B021F] text-white rounded-md hover:bg-[#2a0114] transition-colors"
+            className="px-4 py-2 bg-[#3A0323] text-white rounded-md hover:bg-[#2a0114] transition-colors"
           >
             Manage Unavailable Dates
           </button>
@@ -637,16 +808,19 @@ function Schedule() {
               <div className="space-y-4 max-h-[400px] overflow-y-auto">
                 {sessions.map((session) => (
                   <div 
-                    key={session.id} 
+                    key={`${session.id}-${session.status || 'pending'}`} 
                     className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                      selectedSession?.id === session.id ? 'border-[#3B021F] bg-pink-50' : 'hover:bg-gray-50'
+                      selectedSession?.id === session.id ? 'border-[#3A0323] bg-pink-50' : 'hover:bg-gray-50'
                     }`}
                     onClick={() => handleSessionClick(session)}
                   >
                     <div className="flex justify-between items-start">
                       <div>
-                        <h3 className="font-semibold">{session.studentName || 'Unknown Student'}</h3>
-                        <p className="text-sm text-gray-600">{session.courseYearSection || 'No course info'}</p>
+                        <h3 className="font-semibold">{getStudentName(session)}</h3>
+                        <p className="text-sm text-gray-600">
+                          {session.college}
+                          {session.yearSection && ` - ${session.yearSection}`}
+                        </p>
                         <p className="text-sm text-gray-600">{getSessionTime(session)}</p>
                         {session.remarks === 'Follow up' && (
                           <p className="text-sm text-purple-600 font-medium">
@@ -677,23 +851,60 @@ function Schedule() {
               <div className="mt-6 border-t pt-4">
                 <h3 className="font-semibold mb-3">Session Details</h3>
                 <div className="mt-2 text-sm space-y-2">
-                  <p><strong>Student:</strong> {selectedSession.studentName || 'N/A'}</p>
-                  <p><strong>Course:</strong> {selectedSession.courseYearSection || 'N/A'}</p>
-                  <p><strong>Contact:</strong> {selectedSession.contactNo || selectedSession.email || 'N/A'}</p>
+                  <p><strong>Student:</strong> {getStudentName(selectedSession)}</p>
+                  
+                  <p><strong>College Department & Course & Year:</strong> {
+                    (() => {
+                      let collegeDept = "";
+                      
+                      // Try to get college from direct field
+                      if (selectedSession.college) {
+                        // If it's already a full college name (contains "College of")
+                        if (selectedSession.college.toLowerCase().includes("college of")) {
+                          collegeDept = selectedSession.college;
+                        } else {
+                          // Try to map to full college name
+                          collegeDept = getDepartmentFromCourse(selectedSession.college);
+                        }
+                      } 
+                      // Try to extract from courseYearSection
+                      else if (selectedSession.courseYearSection) {
+                        const parts = selectedSession.courseYearSection.split(' ');
+                        if (parts.length > 0) {
+                          collegeDept = getDepartmentFromCourse(parts[0]);
+                        }
+                      }
+                      
+                      if (!collegeDept || collegeDept === "Unknown College") {
+                        collegeDept = "Unknown College";
+                      }
+                      
+                      // Now add year and section if available
+                      let yearSection = "";
+                      if (selectedSession.yearSection) {
+                        yearSection = ` - ${selectedSession.yearSection}`;
+                      }
+                      
+                      return collegeDept + yearSection;
+                    })()
+                  }</p>
+                  
+                  <p><strong>Contact:</strong> {selectedSession.contactNo || selectedSession.contact || selectedSession.email || 'N/A'}</p>
+                  
+                  <p><strong>Appointment Date:</strong> {
+                    selectedSession.appointmentDate ? 
+                      formatDateForDisplay(selectedSession.appointmentDate) : 
+                      'N/A'
+                  }</p>
+
                   <p><strong>Time:</strong> {getSessionTime(selectedSession)}</p>
-                  
-                  {selectedSession.remarks === 'Follow up' ? (
-                    <p><strong>Status:</strong> <span className={`px-2 py-1 rounded-full ${getStatusClass('Follow up')}`}>
-                      Follow-up
-                    </span></p>
-                  ) : (
-                    <p><strong>Status:</strong> <span className={`px-2 py-1 rounded-full ${getStatusClass(selectedSession.status || 'Pending')}`}>
-                      {selectedSession.status || 'Pending'}
-                    </span></p>
-                  )}
-                  
+
                   {selectedSession.followUpDate && (
-                    <p><strong>Follow-up Date:</strong> {new Date(selectedSession.followUpDate).toLocaleDateString()}</p>
+                    <p><strong>Follow-up Date:</strong> {
+                      formatDateForDisplay(new Date(selectedSession.followUpDate))
+                    }
+                      {selectedSession.followUpTime && ` at ${formatTimeForDisplay(selectedSession.followUpTime)}`}
+                    </p>
                   )}
                   
                   {selectedSession.sessionNotes && (
@@ -701,7 +912,7 @@ function Schedule() {
                   )}
                   
                   {selectedSession.isReferral && (
-                    <p><strong>Referred by:</strong> {selectedSession.referredBy || selectedSession.facultyName || 'N/A'}</p>
+                    <p><strong>Referred by:</strong> {selectedSession.referredBy || selectedSession.referral || 'N/A'}</p>
                   )}
                   
                   {selectedSession.remarks && selectedSession.remarks !== 'Follow up' && (
@@ -717,16 +928,95 @@ function Schedule() {
           </div>
         </div>
       </div>
-      <UnavailableDatesModal
-  showModal={showUnavailableModal}
-  onClose={() => setShowUnavailableModal(false)}
-  unavailableDates={unavailableDates}
-  onDatesUpdated={fetchUnavailableDates}
-  isValidDate={isValidDate}
-/>
       
+      <UnavailableDatesModal
+        showModal={showUnavailableModal}
+        onClose={() => setShowUnavailableModal(false)}
+        unavailableDates={unavailableDates}
+        onDatesUpdated={fetchUnavailableDates}
+        isValidDate={isValidDate}
+      />
     </div>
   );
+}
+
+// Helper function to determine department from course code
+function getDepartmentFromCourse(courseCode) {
+  if (!courseCode) return 'Unknown College';
+  
+  const programCode = courseCode.split(' ')[0];
+  
+  const collegeMap = {
+    'BSA': 'College of Accounting and Business Education',
+    'BSMA': 'College of Accounting and Business Education',
+    'BSAIS': 'College of Accounting and Business Education',
+    'BSBA': 'College of Accounting and Business Education',
+    'BSREM': 'College of Accounting and Business Education',
+    'AB': 'College of Arts and Humanities',
+    'ABCOM': 'College of Arts and Humanities',
+    'ABELS': 'College of Arts and Humanities',
+    'ABPhilo': 'College of Arts and Humanities',
+    'ABPsych': 'College of Arts and Humanities',
+    'BSCS': 'College of Computer Studies',
+    'BSIS': 'College of Computer Studies',
+    'BSIT': 'College of Computer Studies',
+    'BSArch': 'College of Engineering and Architecture',
+    'BSCE': 'College of Engineering and Architecture',
+    'BSCpE': 'College of Engineering and Architecture',
+    'BSECE': 'College of Engineering and Architecture',
+    'BSND': 'College of Human Environmental Sciences and Food Studies',
+    'BSHRM': 'College of Human Environmental Sciences and Food Studies',
+    'BSTM': 'College of Human Environmental Sciences and Food Studies',
+    'BSBio': 'College of Medical and Biological Science',
+    'BSMLS': 'College of Medical and Biological Science',
+    'BM': 'College of Music',
+    'BSN': 'College of Nursing',
+    'BSP': 'College of Pharmacy and Chemistry',
+    'BSChem': 'College of Pharmacy and Chemistry',
+    'BECE': 'College of Teacher Education',
+    'BEEd': 'College of Teacher Education',
+    'BSEd': 'College of Teacher Education',
+    'BSNE': 'College of Teacher Education',
+    'BPE': 'College of Teacher Education',
+  };
+
+  if (collegeMap[programCode]) {
+    return collegeMap[programCode];
+  }
+  
+  for (const prefix in collegeMap) {
+    if (programCode.startsWith(prefix)) {
+      return collegeMap[prefix];
+    }
+  }
+
+  if (programCode.includes('BA') || programCode.includes('Acct') || programCode.includes('Fin') || 
+      programCode.includes('Mgt') || programCode.includes('HRM')) {
+    return 'College of Accounting and Business Education';
+  } else if (programCode.includes('Arch') || programCode.includes('CE') || 
+            programCode.includes('CpE') || programCode.includes('ECE')) {
+    return 'College of Engineering and Architecture';
+  } else if (programCode.includes('Ed') || programCode.includes('Edu') || programCode.includes('Teach')) {
+    return 'College of Teacher Education';
+  } else if (programCode.includes('CS') || programCode.includes('IS') || programCode.includes('IT')) {
+    return 'College of Computer Studies';
+  } else if (programCode.includes('Nurs')) {
+    return 'College of Nursing';
+  } else if (programCode.includes('Pharm') || programCode.includes('Chem')) {
+    return 'College of Pharmacy and Chemistry';
+  } else if (programCode.includes('Bio') || programCode.includes('MLS') || programCode.includes('Lab')) {
+    return 'College of Medical and Biological Science';
+  } else if (programCode.includes('ND') || programCode.includes('HRM') || programCode.includes('TM')) {
+    return 'College of Human Environmental Sciences and Food Studies';
+  } else if (programCode.includes('AB') || programCode.includes('Arts') || 
+            programCode.includes('Com') || programCode.includes('Psych') || 
+            programCode.includes('Phil')) {
+    return 'College of Arts and Humanities';
+  } else if (programCode.includes('Mus') || programCode.includes('BM')) {
+    return 'College of Music';
+  }
+
+  return 'Unknown College';
 }
 
 export default Schedule;

@@ -16,8 +16,9 @@
     serverTimestamp, 
     Timestamp,
     deleteDoc,
-    writeBatch// Add this import
+    writeBatch
   } from 'firebase/firestore';
+ 
 
   /**
    * Submits a student interview form to Firestore.
@@ -67,30 +68,110 @@
 
   export const getActiveCounselingForms = async () => {
     try {
-      console.log("Fetching all active counseling forms...");
-      
-      // Get all forms from the counselingForms collection
+      console.log("Fetching regular counseling forms...");
       const querySnapshot = await getDocs(collection(db, "counselingForms"));
-      console.log(`Found ${querySnapshot.size} total forms in counselingForms collection`);
+      console.log(`Retrieved ${querySnapshot.size} counseling forms from Firebase`);
       
       const forms = [];
+      let processedCount = 0;
+      let skippedCount = 0;
+      
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        console.log(`Form ${doc.id}:`, data);
-        
-        // Only exclude forms that are explicitly marked as "Completed"
-        if (data.status !== 'Completed') {
-          forms.push({
+        try {
+          const data = doc.data();
+          
+          // Skip completed forms
+          if (data.status === 'Completed') {
+            console.log(`Skipping completed form ${doc.id}`);
+            skippedCount++;
+            return;
+          }
+          
+          // Skip forms that are marked as referrals - these will be handled by getReferrals
+          if (data.isReferral === true) {
+            console.log(`Skipping referral form ${doc.id} (will be handled by getReferrals)`);
+            skippedCount++;
+            return;
+          }
+          
+          // Process the regular counseling form
+          const formattedForm = {
             id: doc.id,
-            ...data
-          });
+            name: data.fullName || data.clientName || data.studentName || data.name || 'Unknown',
+            course: data.college || data.course || 'Unknown',
+            year: data.year ? `Year ${data.year}${data.section ? ` Section ${data.section}` : ''}` : 'Unknown',
+            type: data.selectedMode || data.type || 'Walk-in',
+            referral: 'Self',
+            remarks: data.remarks || '',
+            status: data.status || 'Pending',
+            isReferral: false,
+            dateTime: data.submissionDate || data.createdAt || new Date().toISOString(),
+            
+            // Add the original data structures
+            academics: data.academics || {},
+            personal: data.personal || {},
+            family: data.family || {},
+            interpersonal: data.interpersonal || {},
+            griefBereavement: data.griefBereavement || {},
+            gettingToKnowYou: data.gettingToKnowYou || {},
+          
+            // Keep the details object for backward compatibility
+            details: {
+              fullName: data.fullName || data.clientName || data.studentName || data.name || 'Unknown',
+              email: data.email || 'Unknown',
+              courseYear: `${data.college || 'Unknown'} - ${data.year ? `Year ${data.year}${data.section ? ` Section ${data.section}` : ''}` : 'Unknown'}`,
+              department: data.college || 'Unknown Department',
+              id: data.uicId || 'Unknown',
+              dob: data.dob || 'Unknown',
+              ageSex: data.age && data.sex ? `${data.age} / ${data.sex}` : (data.sex ? `Unknown / ${data.sex}` : 'Unknown / Unknown'),
+              contact: data.contact || data.contactNo || 'Unknown',
+              address: data.address || 'Unknown',
+              emergencyContact: data.emergencyContact ? 
+                               `${data.emergencyContact} - ${data.emergencyContactNo || 'Unknown'}` : 
+                               (data.emergencyContactPerson ? 
+                                `${data.emergencyContactPerson} - ${data.emergencyContactNo || 'Unknown'}` : 
+                                'Unknown - Unknown'),
+              date: data.selectedDate || 'Unknown',
+              time: data.selectedTime || 'Unknown',
+              mode: 'Non-Referral',
+              
+              // Initialize concern arrays
+              personal: [],
+              academics: [],
+              family: [],
+              interpersonal: [],
+              grief: [],
+              otherConcerns: data.otherConcerns || '',
+            }
+          };
+          
+          // Extract concerns based on your screenshot structure
+          // Personal concerns
+          if (data.suicide === true) formattedForm.details.personal.push('Suicidal thoughts');
+          if (data.worry === true) formattedForm.details.personal.push('Excessive worry');
+          if (data.time === true) formattedForm.details.personal.push('Time management issues');
+          if (data.usage && data.usage !== "") formattedForm.details.personal.push(`Usage concerns: ${data.usage}`);
+          
+          // If no concerns were added, set to 'None'
+          if (formattedForm.details.personal.length === 0) formattedForm.details.personal = ['None'];
+          if (formattedForm.details.academics.length === 0) formattedForm.details.academics = ['None'];
+          if (formattedForm.details.family.length === 0) formattedForm.details.family = ['None'];
+          if (formattedForm.details.interpersonal.length === 0) formattedForm.details.interpersonal = ['None'];
+          if (formattedForm.details.grief.length === 0) formattedForm.details.grief = ['None'];
+          
+          forms.push(formattedForm);
+          processedCount++;
+          console.log(`Successfully processed regular form ${doc.id}`);
+        } catch (processError) {
+          console.error(`Error processing document ${doc.id}:`, processError);
         }
       });
       
-      console.log(`After filtering, ${forms.length} active forms remain`);
+      console.log(`Processing summary: ${processedCount} regular forms processed, ${skippedCount} forms skipped`);
+      
       return { success: true, forms };
     } catch (error) {
-      console.error('Error getting active counseling forms:', error);
+      console.error('Error getting active forms:', error);
       return { success: false, error: error.message };
     }
   };
@@ -154,95 +235,70 @@
     }
   };
 
-  export const updateFormStatus = async (formId, status, remarks, additionalData = {}) => {
+  export const updateFormStatus = async (formId, status, remarks = '', additionalData = {}) => {
     try {
-      console.log("DEBUG - updateFormStatus called with:", { formId, status, remarks, additionalData });
+      console.log(`Updating form ${formId} to status: ${status}, remarks: ${remarks}`);
       
-      // Check if the user is an admin
-      const isAdmin = localStorage.getItem('userRole') === 'admin' && 
-                     localStorage.getItem('userEmail') === 'admin@gmail.com';
+      // Try referrals collection first for referrals
+      let formRef = doc(db, "referrals", formId);
+      let formDoc = await getDoc(formRef);
+      let isReferralCollection = true;
       
-      if (!isAdmin) {
-        return { 
-          success: false, 
-          error: "Unauthorized access. Only administrators can update forms."
-        };
-      }
-  
-      // Get the current form data to retrieve userId and compare status
-      const formRef = doc(db, "counselingForms", formId);
-      const formDoc = await getDoc(formRef);
-      
+      // If not found in referrals, try counselingForms collection
       if (!formDoc.exists()) {
-        return { success: false, error: "Form not found" };
-      }
-      
-      const formData = formDoc.data();
-      console.log("DEBUG - Form data retrieved:", formData);
-      
-      const oldStatus = formData.status || 'Pending';
-      const oldRemarks = formData.remarks || '';
-      const userId = formData.userId;
-      
-      console.log("DEBUG - userId from form:", userId);
-      console.log("DEBUG - oldStatus:", oldStatus);
-      console.log("DEBUG - status to set:", status);
-  
-      // Prepare update data with additional data included
-      const updateData = {
-        updatedAt: new Date().toISOString(),
-        ...additionalData
-      };
-  
-      // Store previous status if it exists
-      updateData.previousStatus = oldStatus;
-  
-      // Add status if provided
-      if (status) {
-        updateData.status = status;
-      } else if (additionalData.status) {
-        updateData.status = additionalData.status;
-      } else if (remarks && remarks !== 'Follow up' && remarks !== oldRemarks) {
-        updateData.status = 'Completed';
-      }
-  
-      // Add remarks if provided
-      if (remarks) {
-        updateData.remarks = remarks;
-      }
-  
-      console.log("DEBUG - Updating document with:", updateData);
-      
-      // Update the document in Firestore
-      await updateDoc(formRef, updateData);
-      console.log("DEBUG - Document updated successfully");
-  
-      // Send notification based on the type of update
-      if (userId) {
-        console.log("DEBUG - Preparing to send notification to user:", userId);
+        formRef = doc(db, "counselingForms", formId);
+        formDoc = await getDoc(formRef);
+        isReferralCollection = false;
         
-        // STAGE 1: Initial Confirmation
-        if (status === 'Confirmed' && oldStatus !== 'Confirmed' && !additionalData.isFollowUp) {
-          console.log("DEBUG - Sending appointment confirmation notification");
-          const notificationResult = await sendNotificationToUser(
-            userId,
-            'Appointment Confirmed',
-            `Your counseling appointment has been confirmed. Please check your schedule for details.`,
-            {
-              type: 'APPOINTMENT_CONFIRMED',
-              formId: formId
-            }
-          );
-          console.log("DEBUG - Notification result:", notificationResult);
+        if (!formDoc.exists()) {
+          console.error("Form not found in any collection:", formId);
+          return { success: false, error: "Form not found in any collection" };
         }
-        // Other notification conditions...
-      } else {
-        console.log("DEBUG - No userId found, skipping notification");
       }
-  
-      return { success: true };
+      
+      console.log(`Found form in ${isReferralCollection ? 'referrals' : 'counselingForms'} collection`);
+      
+      // Prepare update data
+      const updateData = {
+        status,
+        updatedAt: new Date().toISOString()
+      };
+      
+      // Always include remarks if provided (don't make this conditional)
+      if (remarks) updateData.remarks = remarks;
+      
+      // Add all additional data
+      Object.assign(updateData, additionalData);
+      
+      console.log("Updating with data:", updateData);
+      
+      // Update the document
+      await updateDoc(formRef, updateData);
+      console.log("Document updated successfully");
+      
+      // If completing the session, move to history
+      if (status === 'Completed') {
+        console.log("Moving completed form to history");
+        const historyData = {
+          ...formDoc.data(),
+          ...updateData,
+          originalId: formId,
+          originalCollection: isReferralCollection ? 'referrals' : 'counselingForms',
+          movedToHistoryAt: new Date().toISOString()
+        };
+        
+        await addDoc(collection(db, "counselingHistory"), historyData);
+        await deleteDoc(formRef);
+        console.log("Form moved to history successfully");
+      }
+      
+      return { 
+        success: true,
+        updatedData: updateData,
+        isReferral: isReferralCollection
+      };
     } catch (error) {
-      console.error("DEBUG - Error in updateFormStatus:", error);
+      console.error("Error updating form status:", error);
       return { success: false, error: error.message };
     }
   };
@@ -517,57 +573,7 @@
    * @param {Object} data - Additional data for the notification
    * @returns {Object} - Success status or error message
    */
-  export const debugNotification = async (userId) => {
-  try {
-    console.log("Creating test notification for user:", userId);
-    
-    if (!userId) {
-      console.error("No userId provided");
-      return { success: false, error: "User ID is required" };
-    }
-    
-    // Create a test notification
-    const notificationRef = await addDoc(collection(db, "notifications"), {
-      userId: userId,
-      title: "Test Notification from Web",
-      body: `This is a test notification created at ${new Date().toISOString()}`,
-      data: {
-        type: "TEST",
-        formId: `test-${Date.now()}`
-      },
-      sent: false,
-      read: false,
-      createdAt: new Date().toISOString(),
-      createdAtTimestamp: Timestamp.now(),
-    });
-    
-    console.log("Test notification created with ID:", notificationRef.id);
-    
-    // Wait a moment and check if it was processed
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    const notificationDoc = await getDoc(doc(db, "notifications", notificationRef.id));
-    if (notificationDoc.exists()) {
-      const data = notificationDoc.data();
-      console.log("Notification status after 5 seconds:", {
-        id: notificationRef.id,
-        sent: data.sent,
-        read: data.read,
-        sentAt: data.sentAt
-      });
-    } else {
-      console.log("Notification no longer exists");
-    }
-    
-    return { 
-      success: true, 
-      notificationId: notificationRef.id 
-    };
-  } catch (error) {
-    console.error("Error in debugNotification:", error);
-    return { success: false, error: error.message };
-  }
-};
+  
 
   export const processMobileFormData = async (formData) => {
     try {
@@ -672,6 +678,7 @@
     if (interpersonal.difficultyGettingAlong) concerns.push('difficultyGettingAlong');
     return concerns;
   }
+
 
   export const sendNotificationToUser = async (userId, title, body, data = {}) => {
     try {
@@ -812,96 +819,7 @@
     }
   };
 
-  /**
-   * Sends a reminder notification for an upcoming session
-   * @param {string} formId - The form/session ID
-   * @param {string} userId - The user ID to notify
-   * @param {Date} sessionDate - The date of the session
-   * @returns {Object} - Success status or error message
-   */
-  export const sendSessionReminder = async (formId, userId, sessionDate) => {
-    try {
-      if (!userId || !sessionDate) {
-        return { success: false, error: "User ID and session date are required" };
-      }
-      
-      const formattedDate = new Date(sessionDate).toLocaleDateString();
-      const formattedTime = new Date(sessionDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-      
-      return await sendNotificationToUser(
-        userId,
-        'Upcoming Counseling Session',
-        `Reminder: You have a counseling session scheduled for ${formattedDate} at ${formattedTime}.`,
-        {
-          type: 'SESSION_REMINDER',
-          formId: formId,
-        }
-      );
-    } catch (error) {
-      console.error('Error sending session reminder:', error);
-      return { success: false, error: error.message };
-    }
-  };
 
-  /**
-   * Sends a direct message notification to a user
-   * @param {string} userId - The user ID to notify
-   * @param {string} message - The message to send
-   * @param {string} senderName - Name of the sender (e.g., "Counselor Smith")
-   * @returns {Object} - Success status or error message
-   */
-
-  /**
-   * Deletes old sent notifications to keep the database clean
-   * Typically would be called periodically or by an admin action
-   * @param {number} daysOld - Delete notifications older than this many days
-   * @returns {Object} - Success status or error message
-   */
-  // Fix the closing brace of cleanupOldNotifications and add sendTestNotification as a separate function
-  export const cleanupOldNotifications = async (daysOld = 30) => {
-    try {
-      // Check if the user is an admin
-      const isAdmin = localStorage.getItem('userRole') === 'admin' && 
-                    localStorage.getItem('userEmail') === 'admin@gmail.com';
-      
-      if (!isAdmin) {
-        return { 
-          success: false, 
-          error: "Unauthorized access. Only administrators can cleanup notifications."
-        };
-      }
-      
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-      const cutoffTimestamp = Timestamp.fromDate(cutoffDate);
-      
-      // Query for old, sent notifications
-      const q = query(
-        collection(db, "notifications"),
-        where("sent", "==", true),
-        where("createdAtTimestamp", "<", cutoffTimestamp),
-        limit(500) // Process in batches for large collections
-      );
-      
-      const querySnapshot = await getDocs(q);
-      
-      // Delete each notification
-      let deleteCount = 0;
-      for (const document of querySnapshot.docs) {
-        await deleteDoc(doc(db, "notifications", document.id));
-        deleteCount++;
-      }
-      
-      return { 
-        success: true, 
-        message: `Deleted ${deleteCount} old notifications`,
-        count: deleteCount
-      };
-    } catch (error) {
-      console.error('Error cleaning up old notifications:', error);
-      return { success: false, error: error.message };
-    }
-  }; // This is the correct closing brace for cleanupOldNotifications
 
   /**
    * Gets all student interview forms that are not explicitly marked as completed
@@ -944,7 +862,7 @@
    */
   export const getCompletedInterviewForms = async () => {
     try {
-      console.log("Fetching completed interview forms...");
+      console.log("Fetching completed interview forms from history collection...");
       
       // Check admin status
       const isAdmin = localStorage.getItem('userRole') === 'admin' && 
@@ -957,23 +875,25 @@
         };
       }
       
-      // Get all forms
-      const formsCollection = collection(db, "counselingForms");
-      const querySnapshot = await getDocs(formsCollection);
+      // Get forms from the counselingHistory collection
+      const historyCollection = collection(db, "counselingHistory");
+      const querySnapshot = await getDocs(historyCollection);
+      
+      console.log(`Found ${querySnapshot.size} documents in history collection`);
       
       const forms = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        // Only include forms that are completed
-        if (data.status === 'Completed') {
-          forms.push({
-            id: doc.id,
-            ...data
-          });
-        }
+        // Log each document to see what fields it contains
+        console.log("History form:", doc.id, data);
+        
+        forms.push({
+          id: doc.id,
+          ...data
+        });
       });
       
-      console.log(`Successfully fetched ${forms.length} completed forms`);
+      console.log(`Successfully fetched ${forms.length} completed forms from history`);
       return { success: true, forms };
     } catch (error) {
       console.error('Error getting completed interview forms:', error);
@@ -981,206 +901,9 @@
     }
   };
 
-  export const submitReferral = async (referralData) => {
-    try {
-      // Validate required fields
-      if (!referralData.clientName || !referralData.referredBy) {
-        throw new Error("Required fields are missing.");
-      }
-
-      // Transform referral data to match counselingForms structure
-      const enhancedReferralData = {
-        // Basic info
-        fullName: referralData.clientName || '',
-        email: referralData.email || '',
-        status: 'Pending',
-        submissionDate: new Date().toISOString(),
-        type: 'Referral', // Mark as referral
-        referral: referralData.referredBy || 'Faculty',
-        remarks: referralData.remarks || '',
-        isReferral: true, // Important flag to identify referrals
-        
-        // Original referral data (keep for reference)
-        referralData: {
-          ...referralData
-        },
-        
-        // Add required fields for compatibility with counselingForms
-        college: referralData.courseYear?.split(' ')[0] || '',
-        selectedDate: referralData.date || '',
-        
-        // Structured concerns to match counselingForms format
-        academics: processReferralAcademicConcerns(referralData.academicConcerns),
-        personal: processReferralPersonalConcerns(referralData.personalConcerns),
-        
-        // Add metadata
-        convertedFromReferral: true,
-        referralCreatedAt: new Date().toISOString()
-      };
-
-      // Add to counselingForms collection
-      const docRef = await addDoc(collection(db, "counselingForms"), enhancedReferralData);
-      console.log("Referral added to counselingForms with ID: ", docRef.id);
-      
-      // Also add to original referrals collection for backward compatibility
-      await addDoc(collection(db, "referrals"), referralData);
-      
-      return { success: true, docId: docRef.id };
-    } catch (error) {
-      console.error("Error adding referral: ", error);
-      return { success: false, error: error.message };
-    }
-  };
+  
 
   // Helper functions to process referral concerns
-  function processReferralAcademicConcerns(academicConcerns) {
-    if (!academicConcerns) return {};
-    
-    // Create a structure that matches the counselingForms academics format
-    const result = {
-      academicOthers: typeof academicConcerns === 'string' ? academicConcerns : ''
-    };
-    
-    // If academicConcerns is an array, process it
-    if (Array.isArray(academicConcerns)) {
-      academicConcerns.forEach(concern => {
-        // Map common academic concerns
-        if (concern.includes('difficulty understanding')) {
-          result.difficultyUnderstanding = true;
-        }
-        if (concern.includes('not motivated')) {
-          result.notPrepared = true;
-        }
-        if (concern.includes('worried')) {
-          result.overlyWorried = true;
-        }
-        // Add more mappings as needed
-      });
-    }
-    
-    return result;
-  }
-
-  function processReferralPersonalConcerns(personalConcerns) {
-    if (!personalConcerns) return {};
-    
-    // Create a structure that matches the counselingForms personal format
-    const result = {
-      disorder: typeof personalConcerns === 'string' ? personalConcerns : ''
-    };
-    
-    // If personalConcerns is an array, process it
-    if (Array.isArray(personalConcerns)) {
-      personalConcerns.forEach(concern => {
-        // Map common personal concerns
-        if (concern.includes('confidence') || concern.includes('self-esteem')) {
-          result.confident = true;
-        }
-        if (concern.includes('stress')) {
-          result.stress = true;
-        }
-        if (concern.includes('decision')) {
-          result.decision = true;
-        }
-        // Add more mappings as needed
-      });
-    }
-    
-    return result;
-  }
-
-  export const getReferralsFromCounselingForms = async () => {
-    try {
-      // Check admin status
-      const isAdmin = localStorage.getItem('userRole') === 'admin' && 
-                    localStorage.getItem('userEmail') === 'admin@gmail.com';
-      
-      if (!isAdmin) {
-        return { 
-          success: false, 
-          error: "Unauthorized access. Only administrators can view referrals."
-        };
-      }
-      
-      // Query counselingForms for documents where isReferral is true
-      const q = query(
-        collection(db, "counselingForms"),
-        where("isReferral", "==", true)
-      );
-      
-      const querySnapshot = await getDocs(q);
-      
-      const referrals = [];
-      querySnapshot.forEach((doc) => {
-        referrals.push({
-          id: doc.id,
-          ...doc.data()
-        });
-      });
-      
-      console.log(`Successfully fetched ${referrals.length} referrals from counselingForms`);
-      return { success: true, referrals };
-    } catch (error) {
-      console.error('Error getting referrals:', error);
-      return { success: false, error: error.message };
-    }
-  };
-
-  const openReferralModal = (student) => {
-    console.log("Opening referral modal with data:", student);
-    
-    // If this is a direct referral from the referrals collection, pass it directly
-    if (student.isDirectReferral) {
-      setSelectedReferral(student);
-      setIsReferralModalOpen(true);
-      return;
-    }
-    
-    // Format the referral data to ensure it has all the expected fields
-    const formattedReferral = {
-      id: student.id,
-      clientName: student.name || student.details?.fullName || student.clientName || 'Unknown',
-      courseYear: student.course ? `${student.course} ${student.year}` : (student.details?.courseYear || 'Unknown'),
-      date: student.details?.date || 'Unknown',
-      time: student.details?.time || 'Unknown',
-      referredBy: student.referral || student.details?.referredBy || 'Unknown',
-      remarks: student.remarks || student.details?.referralRemarks || '',
-      otherConcerns: student.otherConcerns || '',
-      
-      // Format academic concerns
-      academicConcerns: Array.isArray(student.details?.academics) 
-        ? student.details.academics 
-        : (Array.isArray(student.academicConcerns) 
-          ? student.academicConcerns 
-          : ['None']),
-      
-      // Format personal concerns
-      personalConcerns: Array.isArray(student.details?.personal) 
-        ? student.details.personal 
-        : (Array.isArray(student.personalConcerns) 
-          ? student.personalConcerns 
-          : ['None']),
-    };
-    
-    console.log("Formatted referral data:", formattedReferral);
-    setSelectedReferral(formattedReferral);
-    setIsReferralModalOpen(true);
-  };
-
-  const fetchDirectReferrals = async () => {
-    try {
-      const result = await getReferrals();
-      if (result.success) {
-        console.log("Direct referrals fetched:", result.referrals.length);
-        setDirectReferrals(result.referrals);
-      } else {
-        toast.error("Failed to fetch referrals: " + result.error);
-      }
-    } catch (error) {
-      console.error("Error fetching direct referrals:", error);
-      toast.error("Error fetching referrals: " + error.message);
-    }
-  };
 
   export const getReferrals = async () => {
     try {
@@ -1195,29 +918,148 @@
         };
       }
       
-      // Get all referrals from the referrals collection
-      const referralsSnapshot = await getDocs(collection(db, "referrals"));
-      console.log(`Found ${referralsSnapshot.size} referrals in referrals collection`);
+      console.log("Fetching referrals from both collections...");
+      
+      // Get referrals from both collections concurrently
+      const [directReferralsSnapshot, referralFormsSnapshot] = await Promise.all([
+        getDocs(collection(db, "referrals")),
+        getDocs(query(collection(db, "counselingForms"), where("isReferral", "==", true)))
+      ]);
+      
+      console.log(`Found ${directReferralsSnapshot.size} direct referrals in referrals collection`);
+      console.log(`Found ${referralFormsSnapshot.size} referral forms in counselingForms collection`);
       
       const referrals = [];
       
-      // Process each referral
-      referralsSnapshot.forEach((doc) => {
-        const data = doc.data();
-        
-        // Create a formatted courseYear if it doesn't exist
-        if (!data.courseYear && data.college) {
-          data.courseYear = `${data.college} - Year ${data.year}${data.section ? ` Section ${data.section}` : ''}`;
+      // Process direct referrals from referrals collection
+      directReferralsSnapshot.forEach((doc) => {
+        try {
+          const data = doc.data();
+          console.log(`Processing direct referral ${doc.id}:`, data);
+          
+          // Skip completed referrals if needed
+          if (data.status === 'Completed') {
+            return;
+          }
+          
+          // Extract course and year information with better handling
+          const college = data.college || '';
+          
+          // Format courseYear with better extraction
+          let courseYear = '';
+          if (data.courseYear) {
+            courseYear = data.courseYear;
+          } else if (data.college) {
+            if (data.year) {
+              courseYear = `${data.college} - Year ${data.year}${data.section ? ` Section ${data.section}` : ''}`;
+            } else {
+              courseYear = data.college;
+            }
+          }
+          
+          // Extract year display value from courseYear or year/section fields
+          let yearDisplay = '';
+          if (data.courseYear) {
+            // Try to extract year from courseYear string like "College of X - Year 3 Section A"
+            const yearMatch = data.courseYear.match(/Year\s+(\d+)(?:\s+Section\s+([A-Z]))?/i);
+            if (yearMatch) {
+              yearDisplay = `Year ${yearMatch[1]}${yearMatch[2] ? ` Section ${yearMatch[2]}` : ''}`;
+            } else if (data.courseYear.includes('-')) {
+              // Try to extract from format with dash
+              const parts = data.courseYear.split('-');
+              if (parts.length > 1) {
+                yearDisplay = parts[1].trim();
+              } else {
+                yearDisplay = data.courseYear;
+              }
+            } else {
+              yearDisplay = data.courseYear;
+            }
+          } else if (data.year) {
+            yearDisplay = `Year ${data.year}${data.section ? ` Section ${data.section}` : ''}`;
+          }
+          
+          // Fix appointment date/time
+          const appointmentDate = data.date || '';
+          const appointmentTime = data.time || '';
+          
+          // Create the formatted referral object
+          const formattedReferral = {
+            id: doc.id,
+            name: data.clientName || '',
+            course: college,
+            year: yearDisplay,
+            type: 'Referral',
+            referral: data.referredBy || 'Faculty',
+            remarks: data.remarks || '',
+            status: data.status || 'Pending',
+            isReferral: true,
+            isDirectReferral: true,
+            dateTime: data.date ? new Date(data.date).toISOString() : new Date().toISOString(),
+            
+            // Include original data for debugging
+            originalData: data,
+            
+            // Specific fields for the UI
+            courseYear: courseYear,
+            date: appointmentDate,
+            time: appointmentTime,
+            academicConcerns: Array.isArray(data.academicConcerns) ? data.academicConcerns : [],
+            personalConcerns: Array.isArray(data.personalConcerns) ? data.personalConcerns : [],
+            otherConcerns: data.otherConcerns || '',
+          };
+          
+          referrals.push(formattedReferral);
+          console.log(`Successfully processed direct referral ${doc.id}`);
+        } catch (error) {
+          console.error(`Error processing direct referral ${doc.id}:`, error);
         }
-        
-        referrals.push({
-          id: doc.id,
-          ...data,
-          isDirectReferral: true // Flag to identify this as a direct referral
-        });
       });
       
-      console.log(`Successfully processed ${referrals.length} referrals`);
+      // Process referral forms from counselingForms collection
+      referralFormsSnapshot.forEach((doc) => {
+        try {
+          const data = doc.data();
+          console.log(`Processing referral form ${doc.id}:`, data);
+          
+          // Skip completed referrals
+          if (data.status === 'Completed') {
+            return;
+          }
+          
+          const formattedReferral = {
+            id: doc.id,
+            name: data.fullName || data.clientName || data.studentName || '',
+            course: data.college || '',
+            year: data.year ? `Year ${data.year}${data.section ? ` Section ${data.section}` : ''}` : '',
+            type: 'Referral',
+            referral: data.referredBy || 'Faculty',
+            remarks: data.remarks || '',
+            status: data.status || 'Pending',
+            isReferral: true,
+            isDirectReferral: false, // This is from counselingForms, not a direct referral
+            dateTime: data.submissionDate || data.createdAt || new Date().toISOString(),
+            
+            // Include original data for debugging
+            originalData: data,
+            
+            // Specific fields for the UI
+            courseYear: data.college ? `${data.college} - Year ${data.year || ''}${data.section ? ` Section ${data.section}` : ''}` : '',
+            date: data.selectedDate || data.date || '',
+            time: data.selectedTime || data.time || '',
+            academicConcerns: data.concerns?.academic || [],
+            personalConcerns: data.concerns?.personal || [],
+            otherConcerns: data.concerns?.other || data.otherConcerns || '',
+          };
+          
+          referrals.push(formattedReferral);
+          console.log(`Successfully processed referral form ${doc.id}`);
+        } catch (error) {
+          console.error(`Error processing referral form ${doc.id}:`, error);
+        }
+      });
+      
+      console.log(`Successfully processed ${referrals.length} total referrals`);
       return { success: true, referrals };
     } catch (error) {
       console.error('Error getting referrals:', error);

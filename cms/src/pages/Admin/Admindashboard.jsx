@@ -1,11 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import AdminNavbar from '../ui/adminnavbar';
 import { Chart } from 'primereact/chart';
-import { db } from '../../firebase/firebase-config';
-import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
-import { getStudentInterviewForms } from '../../firebase/firestoreService';
-import { format, isAfter, startOfMonth, startOfWeek, subDays } from 'date-fns';
+import { 
+  getStudentInterviewForms, 
+  getReferrals,
+  getCompletedInterviewForms 
+} from '../../firebase/firestoreService';
+import { format, isAfter, startOfMonth, startOfWeek, subDays, parseISO, isValid } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+
+// Create a cache object outside the component to persist data between renders
+const dashboardCache = {
+  data: null,
+  lastFetched: null,
+  expiryTime: 5 * 60 * 1000 // 5 minutes in milliseconds
+};
 
 function AdminDashboard() {
   const navigate = useNavigate();
@@ -23,7 +32,7 @@ function AdminDashboard() {
   const [error, setError] = useState(null);
 
   // Define chart colors
-  const chartColors = {
+  const chartColors = useMemo(() => ({
     backgroundColor: [
       'rgba(239, 68, 68, 0.4)',
       'rgba(59, 130, 246, 0.4)',
@@ -50,60 +59,41 @@ function AdminDashboard() {
       'rgb(99, 102, 241)',
       'rgb(209, 213, 219)',
     ]
-  };
+  }), []);
 
-  // Function to determine department from course code
+  // Helper function to determine department from course code
   const getDepartmentFromCourse = (courseCode) => {
-    // Extract the program/degree code from the course code
-    const programCode = courseCode.split(' ')[0]; // Get first part before any spaces
+    if (!courseCode) return 'Unknown College';
     
-    // Map program codes to their respective colleges
+    const programCode = courseCode.split(' ')[0];
+    
     const collegeMap = {
-      // College of Accounting and Business Education (CABE)
       'BSA': 'College of Accounting and Business Education',
       'BSMA': 'College of Accounting and Business Education',
       'BSAIS': 'College of Accounting and Business Education',
       'BSBA': 'College of Accounting and Business Education',
       'BSREM': 'College of Accounting and Business Education',
-      
-      // College of Arts and Humanities (CAH)
       'AB': 'College of Arts and Humanities',
       'ABCOM': 'College of Arts and Humanities',
       'ABELS': 'College of Arts and Humanities',
       'ABPhilo': 'College of Arts and Humanities',
       'ABPsych': 'College of Arts and Humanities',
-      
-      // College of Computer Studies (CCS)
       'BSCS': 'College of Computer Studies',
       'BSIS': 'College of Computer Studies',
       'BSIT': 'College of Computer Studies',
-      
-      // College of Engineering and Architecture (CEA)
       'BSArch': 'College of Engineering and Architecture',
       'BSCE': 'College of Engineering and Architecture',
       'BSCpE': 'College of Engineering and Architecture',
       'BSECE': 'College of Engineering and Architecture',
-      
-      // College of Human Environmental Sciences and Food Studies (CHESFS)
       'BSND': 'College of Human Environmental Sciences and Food Studies',
       'BSHRM': 'College of Human Environmental Sciences and Food Studies',
       'BSTM': 'College of Human Environmental Sciences and Food Studies',
-      
-      // College of Medical and Biological Science (CMBS)
       'BSBio': 'College of Medical and Biological Science',
       'BSMLS': 'College of Medical and Biological Science',
-      
-      // College of Music (CM)
       'BM': 'College of Music',
-      
-      // College of Nursing (CN)
       'BSN': 'College of Nursing',
-      
-      // College of Pharmacy and Chemistry (CPC)
       'BSP': 'College of Pharmacy and Chemistry',
       'BSChem': 'College of Pharmacy and Chemistry',
-      
-      // College of Teacher Education (CTE)
       'BECE': 'College of Teacher Education',
       'BEEd': 'College of Teacher Education',
       'BSEd': 'College of Teacher Education',
@@ -111,24 +101,21 @@ function AdminDashboard() {
       'BPE': 'College of Teacher Education',
     };
 
-    // Check for exact matches first
     if (collegeMap[programCode]) {
       return collegeMap[programCode];
     }
     
-    // For codes that might be variations or not exact matches
     for (const prefix in collegeMap) {
       if (programCode.startsWith(prefix)) {
         return collegeMap[prefix];
       }
     }
 
-    // Additional pattern matching for special cases
     if (programCode.includes('BA') || programCode.includes('Acct') || programCode.includes('Fin') || 
         programCode.includes('Mgt') || programCode.includes('HRM')) {
       return 'College of Accounting and Business Education';
     } else if (programCode.includes('Arch') || programCode.includes('CE') || 
-               programCode.includes('CpE') || programCode.includes('ECE')) {
+              programCode.includes('CpE') || programCode.includes('ECE')) {
       return 'College of Engineering and Architecture';
     } else if (programCode.includes('Ed') || programCode.includes('Edu') || programCode.includes('Teach')) {
       return 'College of Teacher Education';
@@ -143,8 +130,8 @@ function AdminDashboard() {
     } else if (programCode.includes('ND') || programCode.includes('HRM') || programCode.includes('TM')) {
       return 'College of Human Environmental Sciences and Food Studies';
     } else if (programCode.includes('AB') || programCode.includes('Arts') || 
-               programCode.includes('Com') || programCode.includes('Psych') || 
-               programCode.includes('Phil')) {
+              programCode.includes('Com') || programCode.includes('Psych') || 
+              programCode.includes('Phil')) {
       return 'College of Arts and Humanities';
     } else if (programCode.includes('Mus') || programCode.includes('BM')) {
       return 'College of Music';
@@ -153,292 +140,473 @@ function AdminDashboard() {
     return 'Unknown College';
   };
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        console.log("Fetching dashboard data...");
-        
-        // Fetch all interview forms using your existing service
-        const formsResult = await getStudentInterviewForms();
-        
-        if (!formsResult.success) {
-          console.error("Failed to fetch interview forms:", formsResult.error);
-          setError(formsResult.error || "Failed to fetch interview data");
-          setLoading(false);
-          return;
-        }
-        
-        const forms = formsResult.forms || [];
-        console.log(`Successfully fetched ${forms.length} forms`);
-        
-        // Process data for dashboard
-        processFormsData(forms);
-        
-      } catch (error) {
-        console.error("Error in fetchDashboardData:", error);
-        setError("Failed to load dashboard data: " + error.message);
-      } finally {
-        setLoading(false);
+  // Helper function to safely parse dates
+  const parseDateSafely = (dateValue) => {
+    if (!dateValue) return null;
+    
+    try {
+      let date;
+      if (dateValue instanceof Date) {
+        date = dateValue;
+      } else if (typeof dateValue === 'object' && dateValue.toDate) {
+        // Handle Firestore Timestamp
+        date = dateValue.toDate();
+      } else if (typeof dateValue === 'string') {
+        date = new Date(dateValue);
+      } else {
+        return null;
       }
-    };
+      
+      // Check if date is valid
+      return isValid(date) ? date : null;
+    } catch (error) {
+      console.error("Error parsing date:", error, dateValue);
+      return null;
+    }
+  };
 
-    const processFormsData = (forms) => {
-      try {
-        // Initialize college counts with all colleges
-        const collegeCounts = {
-          'CAH': 0,
-          'CMBS': 0,
-          'CCS': 0,
-          'CABE': 0,
-          'CEA': 0,
-          'CHESFS': 0,
-          'CM': 0,
-          'CN': 0,
-          'CPC': 0,
-          'CTE': 0,
-          'Other': 0
-        };
-        
-        // Initialize session types
-        const sessionTypes = {
-          'Referral': 0,
-          'Walk-in': 0
-        };
-        
-        // Get current date for stats calculations
-        const now = new Date();
-        
-        // Calculate time periods for filtering
-        const yesterday = subDays(now, 1);
-        const thisMonth = startOfMonth(now);
-        const thisWeek = startOfWeek(now, { weekStartsOn: 0 }); // 0 means Sunday
-        
-        // Count stats
-        let newRequests = 0;
-        let completedSessions = 0;
-        let noShows = 0;
-        
-        // Process each form
-        forms.forEach(form => {
-          // Count by college using improved college detection
-          const courseYearSection = form.courseYearSection || '';
-          if (courseYearSection) {
-            const collegeName = getDepartmentFromCourse(courseYearSection);
-            let collegeAbbr;
-            
-            // Map full college names to abbreviations
-            switch(collegeName) {
-              case 'College of Arts and Humanities': collegeAbbr = 'CAH'; break;
-              case 'College of Medical and Biological Science': collegeAbbr = 'CMBS'; break;
-              case 'College of Computer Studies': collegeAbbr = 'CCS'; break;
-              case 'College of Accounting and Business Education': collegeAbbr = 'CABE'; break;
-              case 'College of Engineering and Architecture': collegeAbbr = 'CEA'; break;
-              case 'College of Human Environmental Sciences and Food Studies': collegeAbbr = 'CHESFS'; break;
-              case 'College of Music': collegeAbbr = 'CM'; break;
-              case 'College of Nursing': collegeAbbr = 'CN'; break;
-              case 'College of Pharmacy and Chemistry': collegeAbbr = 'CPC'; break;
-              case 'College of Teacher Education': collegeAbbr = 'CTE'; break;
-              default: collegeAbbr = 'Other';
-            }
-            
-            if (collegeCounts.hasOwnProperty(collegeAbbr)) {
-              collegeCounts[collegeAbbr]++;
-            } else {
-              collegeCounts['Other']++;
-            }
+  // Helper function to format date with fallback
+  const formatDate = (dateValue) => {
+    if (!dateValue) return 'Date not specified';
+    
+    const date = parseDateSafely(dateValue);
+    if (!date) return 'Invalid date';
+    
+    try {
+      return format(date, 'MMMM do, yyyy'); // Format as "April 27th, 2025"
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return 'Date format error';
+    }
+  };
+
+  // Helper function to extract course and year/section from various form formats
+  const extractCourseAndYearSection = (form) => {
+    // For referrals
+    if (form.isReferral && form.course) {
+      return {
+        course: form.course,
+        yearSection: form.year || 'N/A'
+      };
+    }
+    
+    // If this is a mobile submission
+    if (form.college && form.year) {
+      return {
+        course: form.college,
+        yearSection: `${form.year}${form.section ? form.section : ''}`
+      };
+    }
+    
+    // For legacy submissions
+    const courseYearSection = form.courseYearSection || '';
+    if (!courseYearSection) {
+      return { course: 'N/A', yearSection: 'N/A' };
+    }
+    
+    // Try to match common patterns in the courseYearSection string
+    const match = courseYearSection.match(/([A-Za-z]+)[\s-]*(\d+[A-Za-z]*)/);
+    if (match) {
+      return {
+        course: match[1].trim(), // The program code (e.g., BSCS)
+        yearSection: match[2].trim() // The year and section (e.g., 3A)
+      };
+    }
+    
+    // For more complex formats, try to make a best guess
+    const parts = courseYearSection.split(/[\s-]+/);
+    if (parts.length >= 2) {
+      // Assume first part is course code and rest is year/section
+      return {
+        course: parts[0].trim(),
+        yearSection: parts.slice(1).join(' ').trim()
+      };
+    }
+    
+    // If we can't parse it, return the original as course
+    return {
+      course: courseYearSection,
+      yearSection: 'N/A'
+    };
+  };
+
+  // Helper function to extract primary concern
+  const getPrimaryConcern = (form) => {
+    try {
+      // Check if we have the modern structure with academics map
+      if (form.academics) {
+        if (form.academics.difficultyUnderstanding) return 'difficultyUnderstanding';
+        if (form.academics.notPrepared) return 'notMotivatedStudy';
+        if (form.academics.overlyWorried) return 'overlyWorriedAcademic';
+        if (form.academics.problemBeingOnTime) return 'problemBeingOnTime';
+        if (form.academics.notHappyWithCourse) return 'notHappyWithCourse';
+        if (form.academics.issueWithTeacher) return 'issueWithTeacher';
+        if (form.academics.homesickness) return 'homesickness';
+        if (form.academics.academicOthers) return form.academics.academicOthers;
+      }
+      
+      // Check for personal concerns
+      if (form.personal) {
+        if (form.personal.confident) return 'notConfident';
+        if (form.personal.decision) return 'hardTimeDecisions';
+        if (form.personal.sleeping) return 'problemSleeping';
+        if (form.personal.mood) return 'moodNotStable';
+        if (form.personal.stress) return 'stress';
+        if (form.personal.emotion) return 'emotionalRegulation';
+        if (form.personal.time) return 'timeManagement';
+        if (form.personal.worry) return 'excessiveWorry';
+        if (form.personal.selfHarm) return 'selfHarm';
+        if (form.personal.suicide) return 'suicidalThoughts';
+        if (form.personal.disorder) return form.personal.disorder;
+      }
+      
+      // Check if we have areasOfConcern from legacy forms
+      if (form.areasOfConcern) {
+        const areas = form.areasOfConcern;
+        // Check each area type in priority order
+        if (areas.academic && areas.academic.length > 0) return areas.academic[0];
+        if (areas.personal && areas.personal.length > 0) return areas.personal[0];
+        if (areas.interpersonal && areas.interpersonal.length > 0) return areas.interpersonal[0];
+        if (areas.family && areas.family.length > 0) return areas.family[0];
+      }
+      
+      // Check referral format
+      if (form.academicConcerns && form.academicConcerns.length > 0) {
+        return form.academicConcerns[0];
+      }
+      if (form.personalConcerns && form.personalConcerns.length > 0) {
+        return form.personalConcerns[0];
+      }
+      if (form.concerns) {
+        if (form.concerns.academic && form.concerns.academic.length > 0) return form.concerns.academic[0];
+        if (form.concerns.personal && form.concerns.personal.length > 0) return form.concerns.personal[0];
+      }
+      
+      // If we have a reason field, use that
+      if (form.reason) return form.reason;
+      if (form.otherConcerns) return form.otherConcerns;
+      
+    } catch (error) {
+      console.error("Error extracting concern:", error);
+    }
+    
+    return 'General Counseling';
+  };
+
+  // Process all forms data to extract necessary information
+  const processFormsData = (allForms) => {
+    try {
+      console.log(`Processing ${allForms.length} total forms`);
+      
+      // Initialize counters and data structures
+      const collegeCounts = {};
+      const sessionTypes = {
+        'Walk-in': 0,
+        'Online': 0,
+        'Referral': 0
+      };
+      
+      // Get current date references
+      const now = new Date();
+      const yesterday = subDays(now, 1);
+      const thisWeekStart = startOfWeek(now);
+      const thisMonthStart = startOfMonth(now);
+      
+      // Initialize stats
+      let totalStudents = 0;
+      let newRequests = 0;
+      let completedSessions = 0;
+      let noShows = 0;
+      
+      // Track recent activities
+      const recentActivitiesList = [];
+
+      // Process each form
+      allForms.forEach((form) => {
+        try {
+          // Extract basic info
+          const studentName = form.name || form.studentName || form.clientName || form.fullName || 'Unknown Student';
+          const { course, yearSection } = extractCourseAndYearSection(form);
+          
+          // Determine college name with fallbacks
+          let collegeName;
+          if (form.college) {
+            collegeName = form.college;
+          } else if (form.course) {
+            collegeName = getDepartmentFromCourse(form.course);
           } else {
-            collegeCounts['Other']++;
+            collegeName = getDepartmentFromCourse(course) || 'Unknown College';
           }
+          
+          // Parse submission date with various fallback options
+          let submissionDate;
+          if (form.remarks === 'Follow up' && form.followUpDate) {
+            submissionDate = parseDateSafely(form.followUpDate);
+          } else if (form.date) {
+            submissionDate = parseDateSafely(form.date);
+          } else if (form.submissionDate) {
+            submissionDate = parseDateSafely(form.submissionDate);
+          } else if (form.createdAt) {
+            submissionDate = parseDateSafely(form.createdAt);
+          } else if (form.timestamp) {
+            submissionDate = parseDateSafely(form.timestamp);
+          } else if (form.dateTime) {
+            submissionDate = parseDateSafely(form.dateTime);
+          } else if (form.movedToHistoryAt) {
+            submissionDate = parseDateSafely(form.movedToHistoryAt);
+          } else {
+            submissionDate = new Date(); // Default to current date if no date found
+          }
+          
+          const formattedDate = submissionDate ? formatDate(submissionDate) : 'Unknown Date';
+          
+          // Determine session type
+          const isReferral = form.isReferral === true;
+          let sessionType;
+          if (isReferral) {
+            sessionType = 'Referral';
+          } else if (form.selectedMode === 'Online' || form.type === 'Online') {
+            sessionType = 'Online';
+          } else {
+            sessionType = 'Walk-in';
+          }
+          
+          // Get status with fallbacks
+          const status = form.status || 'Pending';
+          const remarks = form.remarks || '';
+          
+          // Count by college
+          collegeCounts[collegeName] = (collegeCounts[collegeName] || 0) + 1;
           
           // Count by session type
-          if (form.isReferral === true) {
-            sessionTypes['Referral']++;
-          } else {
-            sessionTypes['Walk-in']++;
-          }
+          sessionTypes[sessionType] = (sessionTypes[sessionType] || 0) + 1;
           
-          // Get relevant dates from the form
-          const submissionDate = form.submissionDate ? new Date(form.submissionDate) : null;
-          const updatedDate = form.updatedAt ? new Date(form.updatedAt) : null;
+          // Count total students
+          totalStudents++;
           
-          // Check if it's a new request (submitted since yesterday)
+          // Count new requests since yesterday
           if (submissionDate && isAfter(submissionDate, yesterday)) {
             newRequests++;
           }
           
-          // Check if it's a completed session this month
-          // Accept both "Completed" and "Reviewed" as completion statuses
-          if ((form.status === 'Completed' || form.status === 'Reviewed')) {
-            // For completed sessions, prefer the updatedAt date if available
-            const statusDate = updatedDate || submissionDate;
-            if (statusDate && isAfter(statusDate, thisMonth)) {
-              completedSessions++;
-            }
+          // Count completed sessions this month
+          if (status === 'Completed' && submissionDate && isAfter(submissionDate, thisMonthStart)) {
+            completedSessions++;
           }
           
-          // Check if it's a no-show this week
-          // Accept both "No-show" and "No Show" as no-show statuses
-          if (form.status === 'No-show' || form.status === 'No Show' || 
-              (form.remarks && form.remarks === 'No Show')) {
-            // For no-shows, prefer the updatedAt date if available
-            const statusDate = updatedDate || submissionDate;
-            if (statusDate && isAfter(statusDate, thisWeek)) {
-              noShows++;
+          // Count no-shows this week
+          if ((status === 'No-show' || status === 'No Show' || 
+               remarks === 'No Show' || remarks === 'No-show') && 
+              submissionDate && isAfter(submissionDate, thisWeekStart)) {
+            noShows++;
+          }
+          
+          // Add to recent activities (limit to most recent 3)
+          if (recentActivitiesList.length < 3) {
+            recentActivitiesList.push({
+              id: form.id || `form-${recentActivitiesList.length}`,
+              studentName: studentName, 
+              course: collegeName,
+              yearSection: yearSection,
+              submissionDate: formattedDate,
+              isReferral,
+              type: sessionType
+            });
+          }
+        } catch (formError) {
+          console.error("Error processing form:", formError, form.id);
+        }
+      });
+
+      // Sort recent activities by date (newest first)
+      recentActivitiesList.sort((a, b) => {
+        const dateA = new Date(a.submissionDate);
+        const dateB = new Date(b.submissionDate);
+        return dateB - dateA;
+      });
+
+      // Prepare pie chart data for colleges
+      const collegeData = {
+        labels: Object.keys(collegeCounts),
+        datasets: [
+          {
+            label: 'Students per College',
+            data: Object.values(collegeCounts),
+            backgroundColor: chartColors.backgroundColor.slice(0, Object.keys(collegeCounts).length),
+            borderColor: chartColors.borderColor.slice(0, Object.keys(collegeCounts).length),
+            borderWidth: 1,
+          },
+        ],
+      };
+
+      // Prepare bar chart data for session types
+      const sessionData = {
+        labels: Object.keys(sessionTypes),
+        datasets: [
+          {
+            label: 'Session Types',
+            data: Object.values(sessionTypes),
+            backgroundColor: chartColors.backgroundColor.slice(0, 3),
+            borderColor: chartColors.borderColor.slice(0, 3),
+            borderWidth: 1,
+          },
+        ],
+      };
+
+      // Set chart options
+      const options = {
+        plugins: {
+          legend: {
+            position: 'right',
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const label = context.label || '';
+                const value = context.raw || 0;
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const percentage = Math.round((value / total) * 100);
+                return `${label}: ${value} (${percentage}%)`;
+              }
             }
           }
-        });
-        
-        // Set dashboard stats
-        setDashboardStats({
-          totalStudents: forms.length,
+        },
+        responsive: true,
+        maintainAspectRatio: false,
+      };
+
+      // Update all state variables
+      setStudentsPerCollegeData(collegeData);
+      setSessionTypesData(sessionData);
+      setChartOptions(options);
+      setDashboardStats({
+        totalStudents,
+        newRequests,
+        completedSessions,
+        noShows
+      });
+      setRecentActivities(recentActivitiesList);
+
+      // Store processed data in cache
+      dashboardCache.data = {
+        collegeData,
+        sessionData,
+        options,
+        stats: {
+          totalStudents,
           newRequests,
           completedSessions,
           noShows
-        });
-        
-        // Clean up college counts - remove colleges with zero count
-        const nonZeroColleges = {};
-        Object.entries(collegeCounts).forEach(([college, count]) => {
-          if (count > 0) {
-            nonZeroColleges[college] = count;
-          }
-        });
-        
-        // Prepare pie chart data with improved colors
-        const collegeData = {
-          labels: Object.keys(nonZeroColleges),
-          datasets: [
-            {
-              label: 'Students per College',
-              data: Object.values(nonZeroColleges),
-              backgroundColor: chartColors.backgroundColor.slice(0, Object.keys(nonZeroColleges).length),
-              borderColor: chartColors.borderColor.slice(0, Object.keys(nonZeroColleges).length),
-              borderWidth: 1,
-            },
-          ],
-        };
-        setStudentsPerCollegeData(collegeData);
-        
-        // Prepare bar chart data
-        const sessionData = {
-          labels: Object.keys(sessionTypes),
-          datasets: [
-            {
-              label: 'Session Types',
-              data: Object.values(sessionTypes),
-              backgroundColor: [chartColors.backgroundColor[0], chartColors.backgroundColor[1]],
-              borderColor: [chartColors.borderColor[0], chartColors.borderColor[1]],
-              borderWidth: 1,
-            },
-          ],
-        };
-        setSessionTypesData(sessionData);
-        
-        // Set chart options
-        // Set chart options with more robust tooltip handling
-        setChartOptions({
-          scales: {
-            y: {
-              beginAtZero: true
-            }
-          },
-          plugins: {
-            legend: {
-              position: 'top',
-              align: 'center',
-              labels: {
-                color: '#495057'
-              }
-            },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  // For pie charts
-                  if (context.chart.config.type === 'pie') {
-                    const label = context.label || '';
-                    const value = context.parsed || context.raw || 0;
-                    return `${label}: ${value}`;
-                  } 
-                  // For bar charts
-                  else {
-                    let label = context.dataset.label || '';
-                    if (label) {
-                      label += ': ';
-                    }
-                    if (context.parsed.y !== null) {
-                      label += context.parsed.y;
-                    }
-                    return label;
-                  }
-                }
-              }
-            }
-          },
-          maintainAspectRatio: false
-        });
-        
-        // Get recent activities (sort by submission date)
-        const sortedForms = [...forms].sort((a, b) => {
-          const dateA = a.submissionDate ? new Date(a.submissionDate) : new Date(0);
-          const dateB = b.submissionDate ? new Date(b.submissionDate) : new Date(0);
-          return dateB - dateA;
-        });
-        
-        // Take the 3 most recent
-        const recentActivitiesData = sortedForms.slice(0, 3).map(form => ({
-          id: form.id,
-          studentName: form.studentName || 'Unknown Student',
-          courseYearSection: form.courseYearSection || 'N/A',
-          submissionDate: form.submissionDate ? format(new Date(form.submissionDate), 'PPP') : 'Unknown date',
-          isReferral: form.isReferral === true,
-          referredBy: form.referredBy || form.facultyName || 'Self',
-          concerns: form.concerns || form.areasOfConcern || {},
-          reason: getConcernText(form)
-        }));
-        
-        setRecentActivities(recentActivitiesData);
-        
-      } catch (error) {
-        console.error("Error processing forms data:", error);
-        setError("Error processing dashboard data: " + error.message);
-      }
-    };
+        },
+        recentActivities: recentActivitiesList
+      };
+      dashboardCache.lastFetched = Date.now();
+      
+    } catch (error) {
+      console.error("Error processing forms data:", error);
+      setError("Error processing dashboard data: " + error.message);
+    }
+  };
 
-    // Helper function to extract concern text
-    const getConcernText = (form) => {
-      // Handle different formats of concerns
-      if (form.concerns) {
-        // Faculty referral format
-        if (form.concerns.academic && form.concerns.academic.length > 0) {
-          return form.concerns.academic[0];
-        }
-        if (form.concerns.personal && form.concerns.personal.length > 0) {
-          return form.concerns.personal[0];
-        }
-      } else if (form.areasOfConcern) {
-        // Student form format
-        const areas = form.areasOfConcern;
-        if (areas.academic && areas.academic.length > 0) {
-          return areas.academic[0];
-        }
-        if (areas.personal && areas.personal.length > 0) {
-          return areas.personal[0];
-        }
-        if (areas.interpersonal && areas.interpersonal.length > 0) {
-          return areas.interpersonal[0];
-        }
-        if (areas.family && areas.family.length > 0) {
-          return areas.family[0];
-        }
+  // Main data fetching function
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Check if we have valid cached data
+      const now = Date.now();
+      if (
+        dashboardCache.data && 
+        dashboardCache.lastFetched && 
+        (now - dashboardCache.lastFetched < dashboardCache.expiryTime)
+      ) {
+        console.log("Using cached dashboard data");
+        
+        // Use cached data
+        setStudentsPerCollegeData(dashboardCache.data.collegeData);
+        setSessionTypesData(dashboardCache.data.sessionData);
+        setChartOptions(dashboardCache.data.options);
+        setDashboardStats(dashboardCache.data.stats);
+        setRecentActivities(dashboardCache.data.recentActivities);
+        setLoading(false);
+        return;
       }
       
-      return "Not specified";
-    };
+      console.log("Fetching fresh dashboard data...");
+      
+      // Fetch all data types concurrently
+      const [formsResult, referralsResult, historyResult] = await Promise.all([
+        getStudentInterviewForms(),
+        getReferrals(),
+        getCompletedInterviewForms()
+      ]);
+      
+      // Combine all forms
+      let allForms = [];
+      
+      if (formsResult.success) {
+        const regularForms = formsResult.forms || [];
+        console.log(`Successfully fetched ${regularForms.length} regular forms`);
+        allForms = [...allForms, ...regularForms];
+      } else {
+        console.error("Failed to fetch regular forms:", formsResult.error);
+        setError(formsResult.error || "Failed to fetch regular forms");
+      }
+      
+      // Handle referrals
+      if (referralsResult && referralsResult.success) {
+        const referrals = referralsResult.referrals || [];
+        console.log(`Successfully fetched ${referrals.length} referrals`);
+        allForms = [...allForms, ...referrals];
+      } else {
+        console.error("Failed to fetch referrals:", referralsResult?.error || "Unknown error");
+      }
+      
+      // Handle history forms
+      if (historyResult && historyResult.success) {
+        const historyForms = historyResult.forms || [];
+        console.log(`Successfully fetched ${historyForms.length} history forms`);
+        allForms = [...allForms, ...historyForms];
+      } else {
+        console.error("Failed to fetch history forms:", historyResult?.error || "Unknown error");
+      }
+      
+      console.log(`Total forms to process: ${allForms.length}`);
+      
+      // Process data for dashboard
+      processFormsData(allForms);
+      
+    } catch (error) {
+      console.error("Error in fetchDashboardData:", error);
+      setError("Failed to load dashboard data: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  // Effect to fetch data on component mount
+  useEffect(() => {
     fetchDashboardData();
+    
+    // Add event listener for visibility change to handle tab switching
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // When tab becomes visible again, check if we need to refresh data
+        const now = Date.now();
+        if (!dashboardCache.lastFetched || (now - dashboardCache.lastFetched > dashboardCache.expiryTime)) {
+          console.log("Tab visible again, refreshing data");
+          fetchDashboardData();
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Cleanup listener on unmount
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   return (
@@ -500,13 +668,8 @@ function AdminDashboard() {
                   recentActivities.map((activity) => (
                     <div key={activity.id} className="mt-4 border-b pb-2">
                       <p className="font-semibold">
-                        {activity.isReferral ? 'New Referral' : 'New Walk-in'}: {activity.studentName} ({activity.courseYearSection})
-                      </p>
-                      <p className="text-gray-600 text-sm">
-                        {activity.isReferral && (
-                          <>Referred by: {activity.referredBy} - </>
-                        )}
-                        <span className="font-bold">Reason:</span> {activity.reason}
+                        {activity.type}: {activity.studentName} ({activity.course}
+                        {activity.yearSection !== 'N/A' ? ` - ${activity.yearSection}` : ''})
                       </p>
                       <p className="text-gray-400 text-xs mt-1">
                         {activity.submissionDate}

@@ -17,28 +17,26 @@ function StudentDetailsModal({
   const isSchedulingFollowUp = dropdownValue === 'Follow up';
   const isReferral = student.isReferral === true;
   const isReturningStudent = student.isReturningStudent === true;
-  const fullName = student.fullName || student.studentName || student.details?.fullName || student.name || 'Not specified';
+  const fullName = student.details?.fullName || student.name || 'Not specified';
 
-// Format course/year the same way as in ReferralModal
-const courseYear = student.courseYearSection || 
-                  (student.college && student.year ? 
-                    `${student.college} - Year ${student.year}${student.section ? ` Section ${student.section}` : ''}` : 
-                    (student.details?.courseYear || 'Not specified'));
+  // Format course/year the same way as in ReferralModal
+  const courseYear = student.details?.courseYear || 'Not specified';
 
-// Get department
-const department = student.college || student.details?.department || 'Not specified';
-
-// Get other fields
-const uicId = student.uicId || student.studentId || student.details?.id || 'Not specified';
-const email = student.email || student.details?.email || 'Not specified';
-const ageSex = student.ageSex || (student.age ? `${student.age} / ${student.sex || 'Not specified'}` : student.details?.ageSex || 'Not specified');
-const contact = student.contact || student.contactNo || student.details?.contact || 'Not specified';
-const dob = student.dob || student.dateOfBirth || student.details?.dob || 'Not specified';
-const address = student.address || student.presentAddress || student.details?.address || 'Not specified';
-const emergencyContact = student.emergencyContact || student.details?.emergencyContact || 'Not specified';
-const appointmentDate = student.selectedDate || student.details?.date || 'Not specified';
-const appointmentTime = student.selectedTime || student.details?.time || 'Not specified';
-const counselingMode = student.selectedMode || student.type || student.details?.mode || 'Not specified';
+  // Get department
+  const department = student.college || student.details?.department || 'Not specified';
+                      
+  // Get other fields
+  const uicId = student.details?.id || 'Not specified';
+  const email = student.details?.email || 'Not specified';
+  const ageSex = student.details?.ageSex || 'Not specified';
+  const contact = student.details?.contact || 'Not specified';
+  const dob = student.details?.dob || 'Not specified';
+  const address = student.details?.address || 'Not specified';
+  const emergencyContact = student.details?.emergencyContact || 'Not specified';
+  const appointmentDate = student.details?.date || 'Not specified';
+  const appointmentTime = student.details?.time || 'Not specified';
+  const counselingMode = student.details?.mode || 'Not specified';
+  
   // Helper function for status color
   const getStatusClass = (status) => {
     switch(status) {
@@ -55,45 +53,7 @@ const counselingMode = student.selectedMode || student.type || student.details?.
   };
 
   // Format course and year properly
-  // Format course and year properly
-  const formatCourseYear = () => {
-    console.log("Formatting course/year with data:", {
-      college: student.college,
-      year: student.year,
-      section: student.section
-    });
-    
-    // Direct access to properties
-    if (student.college && student.year) {
-      return `${student.college} - Year ${student.year}${student.section ? ` Section ${student.section}` : ''}`;
-    }
   
-  // For other data structures
-  if (student.details) {
-    if (student.details.courseYear) {
-      return student.details.courseYear;
-    }
-    
-    // Try to construct from parts in the details
-    const college = student.details.college || student.college || '';
-    const year = student.details.year || student.year || '';
-    const section = student.details.section || student.section || '';
-    
-    if (college) {
-      let result = college;
-      if (year) {
-        result += ` - Year ${year}`;
-        if (section) {
-          result += ` Section ${section}`;
-        }
-      }
-      return result;
-    }
-  }
-  
-  // If we can't find or construct it, return a default
-  return 'Not specified';
-};
 
   // Format academic concerns
   const formatAcademicConcerns = () => {
@@ -281,10 +241,11 @@ const counselingMode = student.selectedMode || student.type || student.details?.
     console.log("handleAccept called with dropdownValue:", dropdownValue);
     console.log("Follow-up date at accept:", followUpDate); 
     console.log("Follow-up time at accept:", followUpTime);
+    console.log("Session notes to be saved:", sessionNotes);
     
     // For initial confirmation (when status is Pending)
     if (isInitialConfirmation) {
-      // Call handleRemarkChange with 'Confirmed' status
+      // Call handleRemarkChange with 'Confirmed' status and session notes
       handleRemarkChange(student.id, 'Confirmed', null, sessionNotes, false);
       return;
     }
@@ -309,7 +270,6 @@ const counselingMode = student.selectedMode || student.type || student.details?.
       // If no dropdown value is selected, show an error
       alert('Please select a status update option');
     }
-    onClose(); // Close the modal after handling the action
   };
 
   // Get the appropriate button text based on the stage
@@ -353,70 +313,66 @@ const counselingMode = student.selectedMode || student.type || student.details?.
         </div>
         
         {/* Client Information */}
-        {/* Client Information */}
-<div className="mb-6">
-  <h3 className="text-lg font-semibold mb-3 text-[#3A0323]">Client Information</h3>
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <div>
-      <p className="text-sm text-gray-500">Full Name</p>
-      <p className="font-medium">{fullName}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Course/Year</p>
-      <p className="font-medium">{courseYear}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Department</p>
-      <p className="font-medium">{department}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">UIC ID</p>
-      <p className="font-medium">{uicId}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Email</p>
-      <p className="font-medium">{email}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Age/Sex</p>
-      <p className="font-medium">{ageSex}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Contact No.</p>
-      <p className="font-medium">{contact}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Date of Birth</p>
-      <p className="font-medium">{dob}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Address</p>
-      <p className="font-medium">{address}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Emergency Contact</p>
-      <p className="font-medium">{emergencyContact}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Appointment Date</p>
-      <p className="font-medium">{appointmentDate}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Appointment Time</p>
-      <p className="font-medium">{appointmentTime}</p>
-    </div>
-    <div>
-      <p className="text-sm text-gray-500">Mode of Counseling</p>
-      <p className="font-medium">{counselingMode}</p>
-    </div>
-    {isReferral && (
-      <div>
-        <p className="text-sm text-gray-500">Referred By</p>
-        <p className="font-medium">{student.referredBy || student.referral || student.details?.referredBy || 'Not specified'}</p>
-      </div>
-    )}
-  </div>
-</div>
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-3 text-[#3A0323]">Client Information</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-gray-500">Full Name</p>
+              <p className="font-medium">{fullName}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Department/Course/Year</p>
+              <p className="font-medium">{courseYear}</p>
+            </div>
+            
+            <div>
+              <p className="text-sm text-gray-500">UIC ID</p>
+              <p className="font-medium">{uicId}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Email</p>
+              <p className="font-medium">{email}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Age/Sex</p>
+              <p className="font-medium">{ageSex}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Contact No.</p>
+              <p className="font-medium">{contact}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Date of Birth</p>
+              <p className="font-medium">{dob}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Address</p>
+              <p className="font-medium">{address}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Emergency Contact</p>
+              <p className="font-medium">{emergencyContact}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Appointment Date</p>
+              <p className="font-medium">{appointmentDate}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Appointment Time</p>
+              <p className="font-medium">{appointmentTime}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Mode of Counseling</p>
+              <p className="font-medium">{counselingMode}</p>
+            </div>
+            {isReferral && (
+              <div>
+                <p className="text-sm text-gray-500">Referred By</p>
+                <p className="font-medium">{student.referredBy || student.referral || student.details?.referredBy || 'Not specified'}</p>
+              </div>
+            )}
+          </div>
+        </div>
         
         {/* Academic Concerns */}
         <div className="mb-6">

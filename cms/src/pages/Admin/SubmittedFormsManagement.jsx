@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import AdminNavbar from '../ui/adminnavbar';
-// Update import to use the new function
 import { getActiveCounselingForms, updateFormStatus, getReferrals } from '../../firebase/firestoreService';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -22,74 +21,67 @@ function SubmittedFormsManagement() {
   const [followUpTime, setFollowUpTime] = useState('');
   const [isReferralModalOpen, setIsReferralModalOpen] = useState(false);
   const [selectedReferral, setSelectedReferral] = useState(null);
-  const [directReferrals, setDirectReferrals] = useState([]);
+
+  // Initial data fetch
+  useEffect(() => {
+    refreshData();
+  }, []);
 
   // Debug modal state changes
-  // Initial useEffect hooks for fetching data
-useEffect(() => {
-  fetchForms();
-  fetchDirectReferrals();
-}, []);
+  useEffect(() => {
+    console.log("Modal open state changed:", isModalOpen);
+    console.log("Selected student:", selectedStudent);
+  }, [isModalOpen, selectedStudent]);
 
-// Debug modal state changes
-useEffect(() => {
-  console.log("Modal open state changed:", isModalOpen);
-  console.log("Selected student:", selectedStudent);
-}, [isModalOpen, selectedStudent]);
-
-// Process direct referrals after they're fetched
-useEffect(() => {
-  if (directReferrals.length > 0) {
-    console.log("Processing direct referrals for display:", directReferrals.length);
-    
-    // Map direct referrals to match the expected format for the table
-    const formattedReferrals = directReferrals.map(referral => {
-      // Extract college, year and section info
-      const college = referral.college || 'Unknown';
-      const year = referral.year || 'Unknown';
+  // Comprehensive data refresh function
+  const refreshData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      console.log("Refreshing all data...");
       
-      return {
-        id: referral.id,
-        name: referral.clientName || 'Unknown',
-        course: college,
-        year: `Year ${year}${referral.section ? ` Section ${referral.section}` : ''}`,
-        type: 'Referral',
-        referral: referral.referredBy || 'Unknown',
-        remarks: referral.remarks || '',
-        status: referral.status || 'Pending',
-        isReferral: true,
-        isDirectReferral: true,
-        dateTime: referral.submissionDate || new Date().toISOString(),
-        date: referral.date || 'Unknown',
-        time: referral.time || 'Unknown',
-        
-        // Store the complete original data for reference
-        originalData: referral,
-      };
-    });
-    
-    console.log("Formatted direct referrals:", formattedReferrals);
-    
-    // Update forms state to include direct referrals
-    setForms(prevForms => {
-      // First, filter out any existing direct referrals to avoid duplicates
-      const nonDirectReferrals = prevForms.filter(form => !form.isDirectReferral);
+      // Fetch both regular forms and referrals concurrently
+      const [formsResult, referralsResult] = await Promise.all([
+        getActiveCounselingForms(),
+        getReferrals()
+      ]);
       
-      // Combine with the new formatted referrals
-      return [...nonDirectReferrals, ...formattedReferrals];
-    });
-    
-    // Initialize dropdown values for the new referrals
-    setDropdownValues(prev => {
-      const newValues = {...prev};
-      formattedReferrals.forEach(referral => {
-        newValues[referral.id] = '';
+      let allForms = [];
+      
+      if (formsResult.success) {
+        console.log("Regular counseling forms fetched:", formsResult.forms.length);
+        allForms = [...formsResult.forms];
+      } else {
+        console.error("Error fetching regular forms:", formsResult.error);
+      }
+      
+      if (referralsResult.success) {
+        console.log("Referrals fetched:", referralsResult.referrals.length);
+        allForms = [...allForms, ...referralsResult.referrals];
+      } else {
+        console.error("Error fetching referrals:", referralsResult.error);
+      }
+      
+      console.log("Total forms for display:", allForms.length);
+      
+      // Initialize dropdown values
+      const initialDropdownValues = {};
+      allForms.forEach(form => {
+        initialDropdownValues[form.id] = '';
       });
-      return newValues;
-    });
-  }
-}, [directReferrals]);
-  
+      
+      // Update state
+      setForms(allForms);
+      setDropdownValues(initialDropdownValues);
+      
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+      setError("An error occurred while loading data. Please try again.");
+      toast.error("Error loading data: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Helper function to add proper suffix to year number
   const getYearSuffix = (num) => {
@@ -99,6 +91,8 @@ useEffect(() => {
     if (num >= 4) return `${num}th`;
     return 'Unknown';
   };
+  
+  // Open referral modal with formatted data
   const openReferralModal = (student) => {
     console.log("Opening referral modal with data:", student);
     
@@ -119,6 +113,7 @@ useEffect(() => {
         referredBy: originalData.referredBy || student.referral || 'Unknown',
         remarks: originalData.remarks || 'None specified',
         otherConcerns: originalData.otherConcerns || 'None specified',
+        status: originalData.status || student.status || 'Pending',
         
         // Ensure we have arrays for concerns
         academicConcerns: Array.isArray(originalData.academicConcerns) ? originalData.academicConcerns : ['None'],
@@ -142,6 +137,7 @@ useEffect(() => {
       referredBy: student.referral || student.details?.referredBy || 'Unknown',
       remarks: student.remarks || student.details?.referralRemarks || 'None specified',
       otherConcerns: student.otherConcerns || 'None specified',
+      status: student.status || 'Pending',
       
       // Format academic concerns
       academicConcerns: Array.isArray(student.details?.academics) 
@@ -162,31 +158,6 @@ useEffect(() => {
     setSelectedReferral(formattedReferral);
     setIsReferralModalOpen(true);
   };
-
-  const fetchDirectReferrals = async () => {
-    try {
-      setLoading(true);
-      console.log("Fetching direct referrals...");
-      
-      const result = await getReferrals();
-      
-      if (result.success) {
-        console.log("Direct referrals fetched successfully:", result.referrals.length);
-        setDirectReferrals(result.referrals);
-      } else {
-        console.error("Failed to fetch referrals:", result.error);
-        toast.error("Failed to fetch referrals: " + result.error);
-      }
-    } catch (error) {
-      console.error("Error fetching direct referrals:", error);
-      toast.error("Error fetching referrals: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  
-  
 
   // Helper functions for extracting concerns from mobile form data
   const extractAcademicConcerns = (academics, referralAcademicConcerns = null) => {
@@ -360,159 +331,6 @@ useEffect(() => {
     return concerns.map(concern => mappings[category][concern] || concern);
   };
 
-  const fetchForms = async () => {
-    setLoading(true);
-    try {
-      const result = await getActiveCounselingForms();
-  
-      if (result.success) {
-        console.log("Active forms fetched:", result.forms.length);
-  
-        const processedForms = result.forms.map(form => {
-          const isReferral = form.isReferral === true;
-          const isMobileSubmission = form.academics || form.personal;
-  
-          if (isMobileSubmission) {
-            // FIXED: Use year and section instead of age for mobile submissions
-            let yearDisplay = 'Unknown';
-            if (form.year) {
-              yearDisplay = `Year ${form.year}${form.section ? ` Section ${form.section}` : ''}`;
-            } else if (form.age) {
-              // Fallback to age only if year is not available
-              yearDisplay = `${form.age} years`;
-            }
-            
-            const processedForm = {
-              id: form.id,
-              name: form.fullName || 'Unknown',
-              course: form.college || 'Unknown',
-              year: yearDisplay, // FIXED: Use proper year format
-              type: isReferral ? 'Referral' : (form.selectedMode || 'Walk-in'),
-              referral: isReferral ? (form.referredBy || form.referral || 'Faculty') : (form.referral || 'Self'),
-              remarks: form.remarks || '',
-              status: form.status || 'Pending',
-              isReferral: isReferral,
-              dateTime: form.submissionDate || new Date().toISOString(),
-              followUpDate: form.followUpDate,
-              details: {
-                mode: isReferral ? 'Referral' : (form.selectedMode || 'Walk-in'),
-                fullName: form.fullName || (isReferral ? form.clientName : 'Unknown'),
-                email: form.email || 'Unknown',
-                // FIXED: Properly format course/year for details
-                courseYear: form.college ? 
-                  `${form.college}${form.year ? ` - Year ${form.year}${form.section ? ` Section ${form.section}` : ''}` : ''}` : 
-                  (isReferral ? form.courseYear : 'Unknown'),
-                department: form.college || 'Unknown Department',
-                id: form.uicId || (isReferral ? form.userId : 'Unknown'),
-                dob: form.dob || 'Unknown',
-                ageSex: `${form.age || 'Unknown'} / ${form.sex || 'Unknown'}`,
-                contact: form.contact || 'Unknown',
-                address: form.address || 'Unknown',
-                emergencyContact: `${form.emergencyContact || 'Unknown'}`,
-                date: form.selectedDate || form.date || 'Unknown',
-                time: form.selectedTime || 'Unknown',
-                personal: extractPersonalConcerns(form.personal, isReferral ? form.personalConcerns : null),
-                interpersonal: extractInterpersonalConcerns(form.interpersonal),
-                grief: extractGriefConcerns(form.griefBereavement),
-                academics: extractAcademicConcerns(form.academics, isReferral ? form.academicConcerns : null),
-                family: extractFamilyConcerns(form.family),
-                gettingToKnowYou: form.gettingToKnowYou || {},
-                referredBy: isReferral ? (form.referredBy || 'Faculty') : null,
-                referralRemarks: isReferral ? (form.referralData?.remarks || form.remarks || '') : null
-              }
-            };
-            return processedForm;
-          } else {
-            // Process legacy form submission
-            let course = 'Unknown';
-            let year = 'Unknown';
-  
-            if (form.courseYearSection) {
-              if (form.courseYearSection.includes('-')) {
-                const parts = form.courseYearSection.split('-');
-                course = parts[0] || 'Unknown';
-                if (parts[1]) {
-                  const yearDigits = parts[1].match(/\d+/);
-                  if (yearDigits) {
-                    const yearNum = parseInt(yearDigits[0]);
-                    year = getYearSuffix(yearNum);
-                  }
-                }
-              } else {
-                const parts = form.courseYearSection.split(' ');
-                if (parts.length > 0) {
-                  course = parts[0];
-                  const yearDigits = form.courseYearSection.match(/\d+/);
-                  if (yearDigits) {
-                    const yearNum = parseInt(yearDigits[0]);
-                    year = getYearSuffix(yearNum);
-                  } else if (parts.length > 1) {
-                    year = parts[1];
-                  }
-                }
-              }
-            }
-  
-            return {
-              id: form.id,
-              name: form.studentName || form.name || 'Unknown',
-              course: course,
-              year: year,
-              type: form.type || 'Walk-in',
-              referral: form.referral || 'Self',
-              remarks: form.remarks || '',
-              status: form.status || 'Pending',
-              isReferral: form.isReferral === true,
-              dateTime: form.dateTime || form.submissionDate || new Date().toISOString(),
-              followUpDate: form.followUpDate,
-              details: {
-                mode: form.isReferral === true ? 'Referral' : 'Non-Referral',
-                fullName: form.studentName || form.name || 'Unknown',
-                email: form.email || 'Unknown',
-                courseYear: form.courseYearSection || 'Unknown',
-                department: getDepartmentFromCourse(course),
-                id: form.studentId || form.id || '2200000321',
-                dob: form.dateOfBirth || 'Unknown',
-                ageSex: form.ageSex || 'Unknown',
-                contact: form.contactNo || 'Unknown',
-                address: form.presentAddress || 'Unknown',
-                emergencyContact: `${form.emergencyContactPerson || 'Unknown'} - ${form.emergencyContactNo || 'Unknown'}`,
-                date: form.dateTime ? new Date(form.dateTime).toLocaleDateString() : 'Unknown',
-                time: form.dateTime ? new Date(form.dateTime).toLocaleTimeString() : 'Unknown',
-                personal: mapConcernAreasToText(form.areasOfConcern?.personal, 'personal'),
-                interpersonal: mapConcernAreasToText(form.areasOfConcern?.interpersonal, 'interpersonal'),
-                grief: ['None'],
-                academics: mapConcernAreasToText(form.areasOfConcern?.academic, 'academic'),
-                family: mapConcernAreasToText(form.areasOfConcern?.family, 'family'),
-              }
-            };
-          }
-        });
-  
-        // Initialize dropdown values
-        const initialDropdownValues = {};
-      processedForms.forEach(form => {
-        initialDropdownValues[form.id] = '';
-      });
-      setDropdownValues(initialDropdownValues);
-
-      setForms(processedForms);
-      console.log("Forms ready for display:", processedForms.length);
-
-    } else {
-      setError("Failed to fetch forms. Please try again.");
-      toast.error("Failed to fetch forms. Please try again.");
-    }
-  } catch (error) {
-    console.error("Error fetching forms:", error);
-    setError("An error occurred while fetching forms.");
-    toast.error("An error occurred while fetching forms: " + error.message);
-  } finally {
-    setLoading(false);
-  }
-};
-  
-
   // When Follow-up is selected from dropdown
   const handleFollowUpSelection = (formId) => {
     setCurrentFormId(formId);
@@ -614,194 +432,183 @@ useEffect(() => {
     setIsModalOpen(false);
   };
 
-  // Handler for when a remark is selected
-  // Update handleRemarkChange in SubmittedFormsManagement
-const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessionNotes = '', isDropdownChangeOnly = false, followUpTime = null) => {
-  // Add debugging logs
-  console.log("handleRemarkChange called with:", { formId, newRemark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime });
-  
-  // If this is just a dropdown change (not the final submit), just update the state
-  if (isDropdownChangeOnly) {
-    setDropdownValues(prev => ({
-      ...prev,
-      [formId]: newRemark
-    }));
-    
-    // If Follow up is selected, show the follow-up scheduler
-    if (newRemark === 'Follow up') {
-      handleFollowUpSelection(formId);
-    }
-    
-    return;
-  }
+  const isValidDate = (date) => {
+    return date instanceof Date && !isNaN(date.getTime());
+  };
 
+  // Handler for when a remark is selected
+  // In SubmittedFormsManagement.js
+const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessionNotes = '', isDropdownChangeOnly = false, followUpTime = null) => {
   try {
+    console.log("handleRemarkChange called with:", { 
+      formId, 
+      newRemark, 
+      followUpDate, 
+      sessionNotes, 
+      isDropdownChangeOnly, 
+      followUpTime 
+    });
+
+    if (isDropdownChangeOnly) {
+      setDropdownValues(prev => ({
+        ...prev,
+        [formId]: newRemark
+      }));
+
+      if (newRemark === 'Follow up') {
+        handleFollowUpSelection(formId);
+      }
+
+      return;
+    }
+
     setUpdatingId(formId);
-    
-    // Find the current form to determine what stage we're in
+
+    // Find the current form
     const currentForm = forms.find(form => form.id === formId);
+    if (!currentForm) {
+      toast.error("Form not found");
+      return;
+    }
+
+    // Determine if this is a referral
+    const isReferral = currentForm.isReferral === true;
     
-    // STAGE 1: Initial Confirmation (change status to Confirmed)
-    if (newRemark === 'Confirmed' || (isInitialConfirmation && !newRemark)) {
+    // Determine if this is an initial confirmation
+    const isInitialConfirmation = currentForm.status === 'Pending' || !currentForm.status;
+
+    console.log("Processing form:", { 
+      id: formId, 
+      isReferral,
+      isInitialConfirmation, 
+      currentStatus: currentForm.status 
+    });
+
+    // For initial confirmation
+    if (isInitialConfirmation) {
       const additionalData = {
-        status: 'Confirmed',
         confirmedAt: new Date().toISOString()
       };
-      const userIdCheck = await verifyUserIdInForm(formId);
-      console.log("User ID check result:", userIdCheck);
-      
-      if (!userIdCheck.success || !userIdCheck.hasUserId) {
-        toast.error("Cannot send notification: No user ID found in the form");
-        // You might want to continue anyway, or stop here
-      }
-      
+
       if (sessionNotes && sessionNotes.trim() !== '') {
         additionalData.sessionNotes = sessionNotes;
       }
-      
+
       console.log("Confirming appointment with data:", additionalData);
-      const result = await updateFormStatus(formId, 'Confirmed', null, additionalData);
       
+      const result = await updateFormStatus(formId, 'Confirmed', 'Confirmed', additionalData);
+
       if (result.success) {
-        // Update form in the list with new status
-        setForms(forms.map(form => 
-          form.id === formId 
-            ? { 
-                ...form, 
-                status: 'Confirmed',
-                sessionNotes: sessionNotes || form.sessionNotes
-              } 
-            : form
-        ));
+        toast.success("Appointment confirmed successfully!");
         
-        toast.success("Appointment confirmed successfully!", {
-          position: "top-right",
-          autoClose: 3000
-        });
+        // Update the local state to reflect the change immediately
+        setForms(prevForms => 
+          prevForms.map(form => 
+            form.id === formId 
+              ? { 
+                  ...form, 
+                  status: 'Confirmed', 
+                  remarks: 'Confirmed',
+                  // Update any other fields that might have changed
+                  sessionNotes: sessionNotes || form.sessionNotes,
+                  updatedAt: new Date().toISOString()
+                } 
+              : form
+          )
+        );
         
-        if (isModalOpen) {
-          closeModal();
-        }
+        // Close modals
+        if (isModalOpen) closeModal();
+        if (isReferralModalOpen) setIsReferralModalOpen(false);
       } else {
-        console.error("Error confirming appointment:", result);
         toast.error("Failed to confirm appointment: " + (result.error || "Unknown error"));
       }
+      return;
     }
-    
-    // STAGE 2: Follow-up Scheduling
-    else if (newRemark === 'Follow up') {
-      // Check if followUpDate exists and is not empty
-      if (!followUpDate || followUpDate.trim() === '') {
-        console.log("Follow-up date is missing:", followUpDate);
-        toast.error("Please select a follow-up date");
+
+    // For follow-up scheduling
+    if (newRemark === 'Follow up') {
+      if (!followUpDate || !followUpTime) {
+        toast.error("Please select both follow-up date and time");
         return;
       }
-      
-      // Check if followUpTime exists and is not empty
-      if (!followUpTime || followUpTime.trim() === '') {
-        console.log("Follow-up time is missing:", followUpTime);
-        toast.error("Please select a follow-up time");
-        return;
-      }
-      
-      console.log("Proceeding with follow-up, date:", followUpDate, "time:", followUpTime);
-      
-      // Create an object with additional data to pass to updateFormStatus
+
       const additionalData = {
-        followUpDate: followUpDate,
-        followUpTime: followUpTime,
+        followUpDate,
+        followUpTime,
         followUpDateTime: `${followUpDate}T${followUpTime}`,
-        status: 'Confirmed', // Automatically confirm the follow-up
+        status: 'Scheduled',
         remarks: newRemark,
-        isFollowUp: true,
-        autoConfirmed: true
+        isFollowUp: true
+      };
+
+      if (sessionNotes && sessionNotes.trim() !== '') {
+        additionalData.sessionNotes = sessionNotes;
+      }
+
+      console.log("Scheduling follow-up with data:", additionalData);
+      
+      const result = await updateFormStatus(formId, 'Scheduled', newRemark, additionalData);
+
+      if (result.success) {
+        toast.success(`Follow-up scheduled for ${followUpDate} at ${followUpTime}`);
+        
+        // Update the local state immediately
+        setForms(prevForms => 
+          prevForms.map(form => 
+            form.id === formId 
+              ? { 
+                  ...form, 
+                  status: 'Scheduled', 
+                  remarks: 'Follow up',
+                  followUpDate,
+                  followUpTime,
+                  sessionNotes: sessionNotes || form.sessionNotes,
+                  updatedAt: new Date().toISOString()
+                } 
+              : form
+          )
+        );
+        
+        // Close modals
+        if (isModalOpen) closeModal();
+        if (isReferralModalOpen) setIsReferralModalOpen(false);
+      } else {
+        toast.error("Failed to schedule follow-up: " + (result.error || "Unknown error"));
+      }
+      return;
+    }
+
+    // For other status updates (Attended, No Show, etc.)
+    if (['Attended', 'No Show', 'No Response', 'Terminated'].includes(newRemark)) {
+      const additionalData = {
+        status: 'Completed',
+        completedAt: new Date().toISOString()
       };
       
       if (sessionNotes && sessionNotes.trim() !== '') {
         additionalData.sessionNotes = sessionNotes;
       }
+
+      console.log("Completing session with remark:", newRemark, "and data:", additionalData);
       
-      // Update the form with remark and additional data
-      console.log("Scheduling follow-up with data:", additionalData);
-      const result = await updateFormStatus(formId, null, newRemark, additionalData);
-      
-      if (result.success) {
-        // Update form in the list with new remark and follow-up date/time
-        setForms(forms.map(form => 
-          form.id === formId 
-            ? { 
-                ...form, 
-                remarks: newRemark,
-                followUpDate: followUpDate,
-                followUpTime: followUpTime,
-                followUpDateTime: `${followUpDate}T${followUpTime}`,
-                status: 'Confirmed', // Update status to Confirmed
-                sessionNotes: sessionNotes || form.sessionNotes
-              } 
-            : form
-        ));
-        
-        // Reset dropdown value
-        setDropdownValues(prev => ({
-          ...prev,
-          [formId]: ''
-        }));
-        
-        // Show success toast with formatted date and time
-        const formattedDate = new Date(followUpDate).toLocaleDateString();
-        const formattedTime = followUpTime;
-        toast.success(`Follow-up scheduled for ${formattedDate} at ${formattedTime}`, {
-          position: "top-right",
-          autoClose: 3000
-        });
-        
-        // Close the modal if it's open
-        if (isModalOpen) {
-          closeModal();
-        }
-      } else {
-        console.error("Error scheduling follow-up:", result);
-        toast.error("Failed to schedule follow-up: " + (result.error || "Unknown error"));
-      }
-    } 
-    
-    // STAGE 3: Post-Session Update (Attended, No Show, etc.)
-    else {
-      // For all other remarks, move to history by marking as completed
-      const additionalData = {};
-      if (sessionNotes && sessionNotes.trim() !== '') {
-        additionalData.sessionNotes = sessionNotes;
-      }
-      
-      console.log("Completing session with remark:", newRemark);
       const result = await updateFormStatus(formId, 'Completed', newRemark, additionalData);
-      
+
       if (result.success) {
-        // Remove the form from the list
-        setForms(forms.filter(form => form.id !== formId));
+        toast.success(`Session moved to history as ${newRemark}`);
         
-        // Remove from dropdown values
-        const newDropdownValues = {...dropdownValues};
-        delete newDropdownValues[formId];
-        setDropdownValues(newDropdownValues);
+        // Remove from local state
+        setForms(prevForms => prevForms.filter(form => form.id !== formId));
         
-        // Show success toast
-        toast.success(`Session moved to history as ${newRemark}`, {
-          position: "top-right",
-          autoClose: 3000
-        });
-        
-        // Close the modal if it's open
-        if (isModalOpen) {
-          closeModal();
-        }
+        // Close modals
+        if (isModalOpen) closeModal();
+        if (isReferralModalOpen) setIsReferralModalOpen(false);
       } else {
-        console.error("Error completing session:", result);
         toast.error("Failed to update status: " + (result.error || "Unknown error"));
       }
     }
   } catch (error) {
-    console.error("Error updating remark:", error);
+    console.error("Error in handleRemarkChange:", error);
     toast.error("An error occurred: " + error.message);
   } finally {
     setUpdatingId(null);
@@ -848,7 +655,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
             <p>{error}</p>
             <button 
-              onClick={fetchForms}
+              onClick={refreshData}
               className="underline ml-2"
             >
               Try Again
@@ -923,69 +730,69 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
       </div>
 
       <div className="max-w-8xl mx-auto px-6 pt-12">
-  <h1 className="text-2xl font-bold mb-6">Referral</h1>
-  <div className="bg-white shadow-md rounded-lg overflow-hidden">
-    <table className="min-w-full bg-white">
-      <thead className="bg-[#3A0323] border-b text-white">
-        <tr>
-          <th className="text-left py-3 px-4">Name</th>
-          <th className="text-left py-3 px-4">Course</th>
-          <th className="text-left py-3 px-4">Year</th>
-          <th className="text-left py-3 px-4">Type</th>
-          <th className="text-left py-3 px-4">Referral</th>
-          <th className="text-left py-3 px-4">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {referralForms.length > 0 ? (
-          referralForms.map((student) => (
-            <tr
-              key={student.id}
-              className="border-b hover:bg-gray-200 cursor-pointer"
-              onClick={() => openReferralModal(student)}
-            >
-              <td className="py-3 px-4">{student.name}</td>
-              <td className="py-3 px-4">{student.course}</td>
-              <td className="py-3 px-4">{student.year}</td>
-              <td className="py-3 px-4">{student.type}</td>
-              <td className="py-3 px-4">{student.referral}</td>
-              <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                <select
-                  value={dropdownValues[student.id] || ''}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    if (e.target.value) {
-                      setDropdownValues(prev => ({
-                        ...prev,
-                        [student.id]: e.target.value
-                      }));
-                      handleRemarkChange(student.id, e.target.value, null, null, true);
-                    }
-                  }}
-                  className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  disabled={updatingId === student.id}
-                >
-                  <option value="">Select Remarks</option>
-                  <option value="Attended">Attended</option>
-                  <option value="No Show">No Show</option>
-                  <option value="No Response">No Response</option>
-                  <option value="Terminated">Terminated</option>
-                  <option value="Follow up">Follow-up</option>
-                </select>
-              </td>
-            </tr>
-          ))
-        ) : (
-          <tr>
-            <td colSpan="6" className="py-4 text-center text-gray-500">
-              No referral submissions found
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
-  </div>
-</div>
+        <h1 className="text-2xl font-bold mb-6">Referral</h1>
+        <div className="bg-white shadow-md rounded-lg overflow-hidden">
+          <table className="min-w-full bg-white">
+            <thead className="bg-[#3A0323] border-b text-white">
+              <tr>
+                <th className="text-left py-3 px-4">Name</th>
+                <th className="text-left py-3 px-4">Course</th>
+                <th className="text-left py-3 px-4">Year</th>
+                <th className="text-left py-3 px-4">Type</th>
+                <th className="text-left py-3 px-4">Referral</th>
+                <th className="text-left py-3 px-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {referralForms.length > 0 ? (
+                referralForms.map((student) => (
+                  <tr
+                    key={student.id}
+                    className="border-b hover:bg-gray-200 cursor-pointer"
+                    onClick={() => openReferralModal(student)}
+                  >
+                    <td className="py-3 px-4">{student.name}</td>
+                    <td className="py-3 px-4">{student.course}</td>
+                    <td className="py-3 px-4">{student.year}</td>
+                    <td className="py-3 px-4">{student.type}</td>
+                    <td className="py-3 px-4">{student.referral}</td>
+                    <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={dropdownValues[student.id] || ''}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          if (e.target.value) {
+                            setDropdownValues(prev => ({
+                              ...prev,
+                              [student.id]: e.target.value
+                            }));
+                            handleRemarkChange(student.id, e.target.value, null, null, true);
+                          }
+                        }}
+                        className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                        disabled={updatingId === student.id}
+                      >
+                        <option value="">Select Remarks</option>
+                        <option value="Attended">Attended</option>
+                        <option value="No Show">No Show</option>
+                        <option value="No Response">No Response</option>
+                        <option value="Terminated">Terminated</option>
+                        <option value="Follow up">Follow-up</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" className="py-4 text-center text-gray-500">
+                    No referral submissions found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
       
       {/* Student Details Modal */}
       {isModalOpen && selectedStudent && (
@@ -1000,73 +807,82 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
           dropdownValue={dropdownValues[selectedStudent.id] || ''}
         />
       )}
+      
+      {/* Referral Modal */}
       {isReferralModalOpen && selectedReferral && (
-        <ReferralModal 
-          referral={selectedReferral} 
-          onClose={() => setIsReferralModalOpen(false)} 
-        />
-      )}
+  <ReferralModal 
+    referral={selectedReferral} 
+    onClose={() => setIsReferralModalOpen(false)} 
+    handleRemarkChange={(formId, remark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime) => {
+      handleRemarkChange(formId, remark, followUpDate, sessionNotes, isDropdownChangeOnly, followUpTime);
+    }}
+    updatingId={updatingId}
+    dropdownValue={dropdownValues[selectedReferral.id] || ''}
+    isValidDate={isValidDate}  // Pass the function as a prop
+  />
+)}
+
 
       {/* Follow-up Scheduler Modal */}
       {showFollowUpScheduler && (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div className="bg-white w-96 rounded-lg shadow-lg p-6 relative">
-      <button
-        onClick={() => setShowFollowUpScheduler(false)}
-        className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-      >
-        <span className="sr-only">Close</span>
-        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-      
-      <h2 className="text-xl font-bold mb-4">Schedule Follow-up</h2>
-      
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Follow-up Date</label>
-        <input
-          type="date"
-          className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          min={new Date().toISOString().split('T')[0]}
-          onChange={(e) => setFollowUpDate(e.target.value)}
-          required
-        />
-      </div>
-      
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Follow-up Time</label>
-        <input
-          type="time"
-          className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          onChange={(e) => setFollowUpTime(e.target.value)}
-          required
-        />
-      </div>
-      
-      <div className="flex justify-end gap-3">
-        <button
-          onClick={() => {
-            if (followUpDate && followUpTime) {
-              handleFollowUpScheduled(followUpDate, followUpTime);
-            } else {
-              toast.error("Please select both date and time");
-            }
-          }}
-          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-        >
-          Schedule Follow-up
-        </button>
-        <button
-          onClick={() => setShowFollowUpScheduler(false)}
-          className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-)}      
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white w-96 rounded-lg shadow-lg p-6 relative">
+            <button
+              onClick={() => setShowFollowUpScheduler(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+            >
+              <span className="sr-only">Close</span>
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            <h2 className="text-xl font-bold mb-4">Schedule Follow-up</h2>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Follow-up Date</label>
+              <input
+                type="date"
+                className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                min={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setFollowUpDate(e.target.value)}
+                required
+              />
+            </div>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Follow-up Time</label>
+              <input
+                type="time"
+                className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                onChange={(e) => setFollowUpTime(e.target.value)}
+                required
+              />
+            </div>
+            
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  if (followUpDate && followUpTime) {
+                    handleFollowUpScheduled(followUpDate, followUpTime);
+                  } else {
+                    toast.error("Please select both date and time");
+                  }
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+              >
+                Schedule Follow-up
+              </button>
+              <button
+                onClick={() => setShowFollowUpScheduler(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

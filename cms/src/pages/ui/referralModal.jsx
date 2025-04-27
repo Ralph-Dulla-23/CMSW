@@ -1,9 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { updateFormStatus } from '../../firebase/firestoreService';
+import { toast } from 'react-toastify';
+import { format } from 'date-fns'; // 
 
-const ReferralModal = ({ referral, onClose }) => {
+const ReferralModal = ({ referral, onClose, handleRemarkChange, updatingId, dropdownValue, isValidDate }) => {
+  const [sessionNotes, setSessionNotes] = useState('');
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [followUpTime, setFollowUpTime] = useState('');
+
+  // Determine the state of the referral
+  const isInitialConfirmation = referral.status === 'Pending' || !referral.status;
+  const isPostSession = referral.status === 'Confirmed' || referral.status === 'Rescheduled';
+  const isSchedulingFollowUp = dropdownValue === 'Follow up';
+
   // Check if referral data exists
   if (!referral) {
-    console.log("No referral data provided to modal");
+    console.error("No referral data provided to modal");
     return null;
   }
 
@@ -12,7 +24,11 @@ const ReferralModal = ({ referral, onClose }) => {
   // Extract referral data - handles both direct referrals and processed ones
   const clientName = referral.clientName || referral.name || 'Unknown';
   const courseYear = referral.courseYear || `${referral.college || ''} ${referral.year || ''}`;
-  const date = referral.date || referral.details?.date || 'Unknown';
+  const date = referral.date ? (
+    isValidDate(new Date(referral.date)) ? 
+      format(new Date(referral.date), 'MMMM d, yyyy') : 
+      referral.date
+  ) : 'Unknown';
   const time = referral.time || referral.details?.time || 'Unknown';
   const referredBy = referral.referredBy || referral.referral || 'Unknown';
   const remarks = referral.remarks || 'None specified';
@@ -34,6 +50,63 @@ const ReferralModal = ({ referral, onClose }) => {
     personalConcerns = referral.details.personal;
   }
 
+  // Helper function for status color
+  const getStatusClass = (status) => {
+    switch(status) {
+      case 'Attended': return 'bg-green-100 text-green-800';
+      case 'No Show': return 'bg-yellow-100 text-yellow-800';
+      case 'No Response': return 'bg-orange-100 text-orange-800';
+      case 'Terminated': return 'bg-red-100 text-red-800';
+      case 'Follow up': return 'bg-purple-100 text-purple-800';
+      case 'Confirmed': return 'bg-blue-100 text-blue-800';
+      case 'Pending': return 'bg-gray-100 text-gray-800';
+      case 'Rescheduled': return 'bg-yellow-100 text-yellow-800';
+      default: return 'bg-gray-100 text-gray-800'; // Default
+    }
+  };
+
+  // Handle the Accept/Confirm button click
+  const handleAccept = () => {
+    console.log("ReferralModal handleAccept called");
+    console.log("isInitialConfirmation:", isInitialConfirmation);
+    console.log("referral.id:", referral.id);
+    console.log("dropdownValue:", dropdownValue);
+    console.log("sessionNotes:", sessionNotes);
+    
+    // For initial confirmation (when status is Pending)
+    if (isInitialConfirmation) {
+      console.log("Confirming referral appointment");
+      handleRemarkChange(referral.id, 'Confirmed', null, sessionNotes, false);
+      return;
+    }
+    
+    // For Follow up, make sure there's a date and time selected
+    if (dropdownValue === 'Follow up') {
+      if (!followUpDate) {
+        alert('Please select a follow-up date');
+        return;
+      }
+      if (!followUpTime) {
+        alert('Please select a follow-up time');
+        return;
+      }
+      
+      handleRemarkChange(referral.id, dropdownValue, followUpDate, sessionNotes, false, followUpTime);
+    } else if (dropdownValue) {
+      handleRemarkChange(referral.id, dropdownValue, null, sessionNotes, false);
+    } else {
+      alert('Please select a status update option');
+    }
+  };
+
+  
+  // Get the appropriate button text based on the stage
+  const getButtonText = () => {
+    if (isInitialConfirmation) return "Confirm Appointment";
+    if (isSchedulingFollowUp) return "Schedule Follow-up";
+    return "Update Status";
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white w-11/12 max-w-2xl rounded-lg shadow-lg p-6 relative max-h-[90vh] overflow-y-auto">
@@ -51,6 +124,12 @@ const ReferralModal = ({ referral, onClose }) => {
         {/* Header */}
         <div className="border-b pb-4 mb-4">
           <h2 className="text-xl font-bold text-[#3A0323]">Referral Information</h2>
+          
+          {referral.status && (
+            <span className={`ml-2 px-2 py-1 rounded-full inline-block text-sm ${getStatusClass(referral.status)}`}>
+              {referral.status}
+            </span>
+          )}
         </div>
         
         {/* Client Information */}
@@ -127,6 +206,82 @@ const ReferralModal = ({ referral, onClose }) => {
           </div>
         </div>
         
+        {/* Session Notes */}
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-3 text-[#3A0323]">Session Notes</h3>
+          <textarea
+            value={sessionNotes}
+            onChange={(e) => setSessionNotes(e.target.value)}
+            className="w-full px-3 py-2 border rounded-md"
+            rows={3}
+            placeholder="Enter session notes..."
+          />
+        </div>
+        
+        {/* Session Status Update - Only show if not initial confirmation */}
+        {!isInitialConfirmation && (
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold mb-3 text-[#3A0323]">Update Session Status</h3>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Remarks</label>
+                  <select
+                    className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    value={dropdownValue}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleRemarkChange(referral.id, e.target.value, null, null, true);
+                      }
+                    }}
+                    disabled={updatingId === referral.id}
+                  >
+                    <option value="">Select Remarks</option>
+                    <option value="Attended">Attended</option>
+                    <option value="No Show">No Show</option>
+                    <option value="No Response">No Response</option>
+                    <option value="Terminated">Terminated</option>
+                    <option value="Follow up">Follow-up</option>
+                  </select>
+                </div>
+              </div>
+              
+              {/* Only show follow-up date and time fields when Follow-up is selected */}
+              {isSchedulingFollowUp && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Follow-up Date</label>
+                    <input
+                      type="date"
+                      className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      min={new Date().toISOString().split('T')[0]}
+                      value={followUpDate}
+                      onChange={(e) => {
+                        console.log("Date selected:", e.target.value);
+                        setFollowUpDate(e.target.value);
+                      }}
+                      required={isSchedulingFollowUp}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Follow-up Time</label>
+                    <input
+                      type="time"
+                      className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      value={followUpTime}
+                      onChange={(e) => {
+                        console.log("Time selected:", e.target.value);
+                        setFollowUpTime(e.target.value);
+                      }}
+                      required={isSchedulingFollowUp}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         {/* Action Buttons */}
         <div className="flex justify-end gap-3 mt-6 border-t pt-4">
           <button
@@ -136,14 +291,16 @@ const ReferralModal = ({ referral, onClose }) => {
             Close
           </button>
           <button
-            onClick={() => {
-              // You can add functionality to accept the referral here
-              alert('Referral accepted!');
-              onClose();
-            }}
+            type="button"
+            onClick={handleAccept}
             className="px-4 py-2 bg-[#3A0323] text-white rounded-md hover:bg-[#4B0A2E] transition-colors"
+            disabled={
+              updatingId === referral.id || 
+              (isPostSession && !isSchedulingFollowUp && !dropdownValue) ||
+              (isSchedulingFollowUp && (!followUpDate || !followUpTime))
+            }
           >
-            Accept Referral
+            {getButtonText()}
           </button>
         </div>
       </div>
