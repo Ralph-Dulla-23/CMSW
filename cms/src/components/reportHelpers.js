@@ -358,7 +358,6 @@ export const processChartData = (
     'Attended': 0,
     'No Show': 0,
     'No Response': 0,
-    'Terminated': 0,
     'Follow up': 0,
     'None': 0
   };

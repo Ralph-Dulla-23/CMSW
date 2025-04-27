@@ -749,10 +749,6 @@
             body = 'You did not respond to your counseling session confirmation. Please contact the office for assistance.';
             break;
             
-          case 'Terminated':
-            title = 'Session Terminated';
-            body = 'Your counseling session has been terminated. Please contact the counseling office for more information.';
-            break;
             
           default:
             title = 'Session Update';

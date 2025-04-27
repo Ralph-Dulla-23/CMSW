@@ -56,7 +56,7 @@ const ReferralModal = ({ referral, onClose, handleRemarkChange, updatingId, drop
       case 'Attended': return 'bg-green-100 text-green-800';
       case 'No Show': return 'bg-yellow-100 text-yellow-800';
       case 'No Response': return 'bg-orange-100 text-orange-800';
-      case 'Terminated': return 'bg-red-100 text-red-800';
+      
       case 'Follow up': return 'bg-purple-100 text-purple-800';
       case 'Confirmed': return 'bg-blue-100 text-blue-800';
       case 'Pending': return 'bg-gray-100 text-gray-800';
@@ -76,7 +76,16 @@ const ReferralModal = ({ referral, onClose, handleRemarkChange, updatingId, drop
     // For initial confirmation (when status is Pending)
     if (isInitialConfirmation) {
       console.log("Confirming referral appointment");
-      handleRemarkChange(referral.id, 'Confirmed', null, sessionNotes, false);
+      
+      // Special handling for referrals - add referral-specific data
+      const additionalData = {
+        isReferral: true,
+        referralConfirmedAt: new Date().toISOString()
+      };
+      
+      handleRemarkChange(referral.id, 'Confirmed', null, sessionNotes, false, null, additionalData);
+      
+      // No need to add notification code here as it's handled in handleRemarkChange
       return;
     }
     
@@ -91,9 +100,40 @@ const ReferralModal = ({ referral, onClose, handleRemarkChange, updatingId, drop
         return;
       }
       
-      handleRemarkChange(referral.id, dropdownValue, followUpDate, sessionNotes, false, followUpTime);
+      // Special handling for referrals - add referral-specific data
+      const additionalData = {
+        isReferral: true,
+        isFollowUpFromReferral: true
+      };
+      
+      handleRemarkChange(
+        referral.id, 
+        dropdownValue, 
+        followUpDate, 
+        sessionNotes, 
+        false, 
+        followUpTime,
+        additionalData
+      );
+      
+      // No need to add notification code here as it's handled in handleRemarkChange
     } else if (dropdownValue) {
-      handleRemarkChange(referral.id, dropdownValue, null, sessionNotes, false);
+      // Special handling for referrals - add referral-specific data
+      const additionalData = {
+        isReferral: true
+      };
+      
+      handleRemarkChange(
+        referral.id, 
+        dropdownValue, 
+        null, 
+        sessionNotes, 
+        false,
+        null,
+        additionalData
+      );
+      
+      // No need to add notification code here as it's handled in handleRemarkChange
     } else {
       alert('Please select a status update option');
     }
@@ -240,7 +280,7 @@ const ReferralModal = ({ referral, onClose, handleRemarkChange, updatingId, drop
                     <option value="Attended">Attended</option>
                     <option value="No Show">No Show</option>
                     <option value="No Response">No Response</option>
-                    <option value="Terminated">Terminated</option>
+                    
                     <option value="Follow up">Follow-up</option>
                   </select>
                 </div>

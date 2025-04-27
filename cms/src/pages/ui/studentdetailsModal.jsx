@@ -43,7 +43,7 @@ function StudentDetailsModal({
       case 'Attended': return 'bg-green-100 text-green-800';
       case 'No Show': return 'bg-yellow-100 text-yellow-800';
       case 'No Response': return 'bg-orange-100 text-orange-800';
-      case 'Terminated': return 'bg-red-100 text-red-800';
+      
       case 'Follow up': return 'bg-purple-100 text-purple-800';
       case 'Confirmed': return 'bg-blue-100 text-blue-800';
       case 'Pending': return 'bg-gray-100 text-gray-800';
@@ -247,6 +247,8 @@ function StudentDetailsModal({
     if (isInitialConfirmation) {
       // Call handleRemarkChange with 'Confirmed' status and session notes
       handleRemarkChange(student.id, 'Confirmed', null, sessionNotes, false);
+      
+      // No need to add notification code here as it's handled in handleRemarkChange
       return;
     }
     
@@ -263,9 +265,13 @@ function StudentDetailsModal({
       
       // Call the handleRemarkChange function with the student ID, remark, date, time and notes
       handleRemarkChange(student.id, dropdownValue, followUpDate, sessionNotes, false, followUpTime);
+      
+      // No need to add notification code here as it's handled in handleRemarkChange
     } else if (dropdownValue) {
       // For other remarks, just pass the basic parameters
       handleRemarkChange(student.id, dropdownValue, null, sessionNotes, false);
+      
+      // No need to add notification code here as it's handled in handleRemarkChange
     } else {
       // If no dropdown value is selected, show an error
       alert('Please select a status update option');
@@ -519,7 +525,7 @@ function StudentDetailsModal({
                     <option value="Attended">Attended</option>
                     <option value="No Show">No Show</option>
                     <option value="No Response">No Response</option>
-                    <option value="Terminated">Terminated</option>
+                    
                     <option value="Follow up">Follow-up</option>
                   </select>
                 </div>

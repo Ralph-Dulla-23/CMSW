@@ -19,7 +19,9 @@ import History from './pages/Admin/history.jsx';
 import { ProfileProvider } from './pages/ui/ProfileContext.jsx';
 import Schedule from './pages/Admin/schedule.jsx';
 import FacultyNavbar from './pages/ui/facultynavbar.jsx';
-import studentdetailsModal from './pages/ui/studentdetailsModal.jsx'
+import NotificationTestPage from './pages/ui/NotificationTestPage.jsx';
+import NotificationMonitorPage from './pages/ui/NotificationMonitorPage';
+
 
 
 const router = createBrowserRouter([
@@ -39,6 +41,8 @@ const router = createBrowserRouter([
   { path: "/history", element: <History /> },
   { path: "/facultynavbar", element: <FacultyNavbar /> },
   
+  {path: "/NotificationTestPage", element: <NotificationTestPage /> },
+  {path: "/NotificationMonitorPage", element: <NotificationMonitorPage /> },
 ]);
 
 ReactDOM.createRoot(document.getElementById('root')).render(

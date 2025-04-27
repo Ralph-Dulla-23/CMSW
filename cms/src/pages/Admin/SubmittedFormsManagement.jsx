@@ -6,6 +6,9 @@ import 'react-toastify/dist/ReactToastify.css';
 import StudentDetailsModal from '../ui/studentdetailsModal';
 import FollowUpScheduler from '../../components/FollowUpSceduler';
 import ReferralModal from '../ui/referralModal';
+import { sendNotificationToUser } from '../../firebase/notificationService';
+import NotificationModal from '../ui/NotificationModal';
+
 
 function SubmittedFormsManagement() {
   const [forms, setForms] = useState([]);
@@ -21,6 +24,10 @@ function SubmittedFormsManagement() {
   const [followUpTime, setFollowUpTime] = useState('');
   const [isReferralModalOpen, setIsReferralModalOpen] = useState(false);
   const [selectedReferral, setSelectedReferral] = useState(null);
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [selectedNotificationStudent, setSelectedNotificationStudent] = useState(null);
+  
+  
 
   // Initial data fetch
   useEffect(() => {
@@ -82,6 +89,75 @@ function SubmittedFormsManagement() {
       setLoading(false);
     }
   };
+
+  const handleConfirmAppointment = async (appointmentId) => {
+    try {
+      setUpdatingId(appointmentId);
+      
+      // Get the form data first to access the user ID
+      const formDoc = await getDoc(doc(db, "counselingForms", appointmentId));
+      if (!formDoc.exists()) {
+        toast.error("Form not found");
+        return;
+      }
+      
+      const formData = formDoc.data();
+      const userId = formData.userId || formData.uicId; // Use appropriate ID field
+      
+      // Format date and time for notification
+      const appointmentDate = formData.scheduledDate || formData.selectedDate || formData.date || 'the scheduled date';
+      const appointmentTime = formData.scheduledTime || formData.selectedTime || formData.time || 'the scheduled time';
+      
+      // Update status to confirmed
+      const result = await updateFormStatus(appointmentId, 'Confirmed');
+      
+      if (result.success) {
+        // Send notification to the user
+        if (userId) {
+          await sendNotificationToUser(
+            userId,
+            "Appointment Confirmed",
+            `Your counseling appointment has been confirmed for ${appointmentDate} at ${appointmentTime}.`,
+            {
+              type: "APPOINTMENT_CONFIRMED",
+              appointmentId: appointmentId,
+              date: appointmentDate,
+              time: appointmentTime
+            }
+          );
+          
+          toast.success("Appointment confirmed and notification sent");
+        } else {
+          toast.success("Appointment confirmed, but couldn't send notification (no user ID)");
+        }
+        
+        // Refresh the form list
+        fetchForms();
+      } else {
+        toast.error(result.error || "Failed to confirm appointment");
+      }
+    } catch (error) {
+      console.error("Error confirming appointment:", error);
+      toast.error("Error confirming appointment: " + error.message);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+  const openNotificationModal = () => {
+    // For the general notification button, we'll create a dummy student object
+    // that represents the system rather than a specific student
+    const systemUser = {
+      id: 'system',
+      name: 'All Users',
+      details: {
+        fullName: 'System Notification'
+      }
+    };
+    
+    setSelectedNotificationStudent(systemUser);
+    setIsNotificationModalOpen(true);
+  };
+  
 
   // Helper function to add proper suffix to year number
   const getYearSuffix = (num) => {
@@ -438,182 +514,381 @@ function SubmittedFormsManagement() {
 
   // Handler for when a remark is selected
   // In SubmittedFormsManagement.js
-const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessionNotes = '', isDropdownChangeOnly = false, followUpTime = null) => {
-  try {
-    console.log("handleRemarkChange called with:", { 
-      formId, 
-      newRemark, 
-      followUpDate, 
-      sessionNotes, 
-      isDropdownChangeOnly, 
-      followUpTime 
-    });
-
-    if (isDropdownChangeOnly) {
-      setDropdownValues(prev => ({
-        ...prev,
-        [formId]: newRemark
-      }));
-
-      if (newRemark === 'Follow up') {
-        handleFollowUpSelection(formId);
-      }
-
-      return;
-    }
-
-    setUpdatingId(formId);
-
-    // Find the current form
-    const currentForm = forms.find(form => form.id === formId);
-    if (!currentForm) {
-      toast.error("Form not found");
-      return;
-    }
-
-    // Determine if this is a referral
-    const isReferral = currentForm.isReferral === true;
-    
-    // Determine if this is an initial confirmation
-    const isInitialConfirmation = currentForm.status === 'Pending' || !currentForm.status;
-
-    console.log("Processing form:", { 
-      id: formId, 
-      isReferral,
-      isInitialConfirmation, 
-      currentStatus: currentForm.status 
-    });
-
-    // For initial confirmation
-    if (isInitialConfirmation) {
-      const additionalData = {
-        confirmedAt: new Date().toISOString()
-      };
-
-      if (sessionNotes && sessionNotes.trim() !== '') {
-        additionalData.sessionNotes = sessionNotes;
-      }
-
-      console.log("Confirming appointment with data:", additionalData);
-      
-      const result = await updateFormStatus(formId, 'Confirmed', 'Confirmed', additionalData);
-
-      if (result.success) {
-        toast.success("Appointment confirmed successfully!");
-        
-        // Update the local state to reflect the change immediately
-        setForms(prevForms => 
-          prevForms.map(form => 
-            form.id === formId 
-              ? { 
-                  ...form, 
-                  status: 'Confirmed', 
-                  remarks: 'Confirmed',
-                  // Update any other fields that might have changed
-                  sessionNotes: sessionNotes || form.sessionNotes,
-                  updatedAt: new Date().toISOString()
-                } 
-              : form
-          )
-        );
-        
-        // Close modals
-        if (isModalOpen) closeModal();
-        if (isReferralModalOpen) setIsReferralModalOpen(false);
-      } else {
-        toast.error("Failed to confirm appointment: " + (result.error || "Unknown error"));
-      }
-      return;
-    }
-
-    // For follow-up scheduling
-    if (newRemark === 'Follow up') {
-      if (!followUpDate || !followUpTime) {
-        toast.error("Please select both follow-up date and time");
+  const handleRemarkChange = async (
+    formId, 
+    newRemark, 
+    followUpDate = null, 
+    sessionNotes = '', 
+    isDropdownChangeOnly = false, 
+    followUpTime = null,
+    additionalData = {}
+  ) => {
+    try {
+      console.log("handleRemarkChange called with:", { 
+        formId, 
+        newRemark, 
+        followUpDate, 
+        sessionNotes, 
+        isDropdownChangeOnly, 
+        followUpTime,
+        additionalData
+      });
+  
+      if (isDropdownChangeOnly) {
+        setDropdownValues(prev => ({
+          ...prev,
+          [formId]: newRemark
+        }));
+  
+        if (newRemark === 'Follow up') {
+          handleFollowUpSelection(formId);
+        }
+  
         return;
       }
-
-      const additionalData = {
-        followUpDate,
-        followUpTime,
-        followUpDateTime: `${followUpDate}T${followUpTime}`,
-        status: 'Scheduled',
-        remarks: newRemark,
-        isFollowUp: true
-      };
-
-      if (sessionNotes && sessionNotes.trim() !== '') {
-        additionalData.sessionNotes = sessionNotes;
+  
+      setUpdatingId(formId);
+  
+      // Find the current form
+      const currentForm = forms.find(form => form.id === formId);
+      if (!currentForm) {
+        toast.error("Form not found");
+        return;
       }
-
-      console.log("Scheduling follow-up with data:", additionalData);
+  
+      // Determine if this is a referral
+      const isReferral = currentForm.isReferral === true || additionalData.isReferral === true;
       
-      const result = await updateFormStatus(formId, 'Scheduled', newRemark, additionalData);
-
-      if (result.success) {
-        toast.success(`Follow-up scheduled for ${followUpDate} at ${followUpTime}`);
+      // Determine if this is an initial confirmation
+      const isInitialConfirmation = currentForm.status === 'Pending' || !currentForm.status;
+  
+      console.log("Processing form:", { 
+        id: formId, 
+        isReferral,
+        isInitialConfirmation, 
+        currentStatus: currentForm.status 
+      });
+  
+      // Get user ID for notifications
+      const userId = currentForm.userId || currentForm.uicId || additionalData.userId;
+      
+      // Format date and time for notifications
+      const appointmentDate = currentForm.scheduledDate || currentForm.selectedDate || 
+                             currentForm.date || 'the scheduled date';
+      const appointmentTime = currentForm.scheduledTime || currentForm.selectedTime || 
+                             currentForm.time || 'the scheduled time';
+  
+      // For initial confirmation
+      if (isInitialConfirmation) {
+        const updateData = {
+          confirmedAt: new Date().toISOString(),
+          ...additionalData // Include any additional data passed in
+        };
+  
+        if (sessionNotes && sessionNotes.trim() !== '') {
+          updateData.sessionNotes = sessionNotes;
+        }
+  
+        console.log("Confirming appointment with data:", updateData);
         
-        // Update the local state immediately
-        setForms(prevForms => 
-          prevForms.map(form => 
-            form.id === formId 
-              ? { 
-                  ...form, 
-                  status: 'Scheduled', 
-                  remarks: 'Follow up',
-                  followUpDate,
-                  followUpTime,
-                  sessionNotes: sessionNotes || form.sessionNotes,
-                  updatedAt: new Date().toISOString()
-                } 
-              : form
-          )
-        );
-        
-        // Close modals
-        if (isModalOpen) closeModal();
-        if (isReferralModalOpen) setIsReferralModalOpen(false);
-      } else {
-        toast.error("Failed to schedule follow-up: " + (result.error || "Unknown error"));
+        const result = await updateFormStatus(formId, 'Confirmed', 'Confirmed', updateData);
+  
+        if (result.success) {
+          // Send notification to user about confirmed appointment
+          if (userId) {
+            try {
+              // Customize notification based on whether it's a referral or regular appointment
+              const notificationTitle = isReferral 
+                ? "Referral Appointment Confirmed" 
+                : "Appointment Confirmed";
+                
+              const notificationBody = isReferral
+                ? `Your referral appointment has been confirmed for ${appointmentDate} at ${appointmentTime}.`
+                : `Your counseling appointment has been confirmed for ${appointmentDate} at ${appointmentTime}.`;
+                
+              const notificationType = isReferral
+                ? "REFERRAL_CONFIRMED"
+                : "APPOINTMENT_CONFIRMED";
+              
+              // PRODUCTION CHANGE #1: Add priority and category for better notification handling
+              await sendNotificationToUser(
+                userId,
+                notificationTitle,
+                notificationBody,
+                {
+                  type: notificationType,
+                  appointmentId: formId,
+                  date: appointmentDate,
+                  time: appointmentTime,
+                  isReferral: isReferral,
+                  // Production additions
+                  priority: "high",
+                  category: "appointment",
+                  // Remove test flags
+                  isTest: false
+                }
+              );
+              toast.success(isReferral 
+                ? "Referral confirmed and notification sent!" 
+                : "Appointment confirmed and notification sent!");
+            } catch (notifError) {
+              // PRODUCTION CHANGE #2: Enhanced error logging
+              console.error("Error sending notification:", notifError);
+              
+              // PRODUCTION CHANGE #3: Log to analytics or monitoring service
+              // logErrorToMonitoringService("notification_send_failed", {
+              //   userId,
+              //   formId,
+              //   type: isReferral ? "REFERRAL_CONFIRMED" : "APPOINTMENT_CONFIRMED",
+              //   error: notifError.message
+              // });
+              
+              toast.success(isReferral 
+                ? "Referral confirmed, but notification failed to send."
+                : "Appointment confirmed, but notification failed to send.");
+            }
+          } else {
+            toast.success(isReferral 
+              ? "Referral confirmed successfully!" 
+              : "Appointment confirmed successfully!");
+          }
+          
+          // Update the local state to reflect the change immediately
+          setForms(prevForms => 
+            prevForms.map(form => 
+              form.id === formId 
+                ? { 
+                    ...form, 
+                    status: 'Confirmed', 
+                    remarks: 'Confirmed',
+                    // Update any other fields that might have changed
+                    sessionNotes: sessionNotes || form.sessionNotes,
+                    updatedAt: new Date().toISOString(),
+                    ...additionalData // Include additional data in state update
+                  } 
+                : form
+            )
+          );
+          
+          // Close modals
+          if (isModalOpen) closeModal();
+          if (isReferralModalOpen) setIsReferralModalOpen(false);
+        } else {
+          toast.error("Failed to confirm appointment: " + (result.error || "Unknown error"));
+        }
+        return;
       }
-      return;
+  
+      // For follow-up scheduling
+      if (newRemark === 'Follow up') {
+        if (!followUpDate || !followUpTime) {
+          toast.error("Please select both follow-up date and time");
+          return;
+        }
+  
+        const updateData = {
+          followUpDate,
+          followUpTime,
+          followUpDateTime: `${followUpDate}T${followUpTime}`,
+          status: 'Scheduled',
+          remarks: newRemark,
+          isFollowUp: true,
+          ...additionalData // Include any additional data passed in
+        };
+  
+        if (sessionNotes && sessionNotes.trim() !== '') {
+          updateData.sessionNotes = sessionNotes;
+        }
+  
+        console.log("Scheduling follow-up with data:", updateData);
+        
+        const result = await updateFormStatus(formId, 'Scheduled', newRemark, updateData);
+  
+        if (result.success) {
+          // Send notification about follow-up appointment
+          if (userId) {
+            try {
+              // Customize notification based on whether it's a referral or regular appointment
+              const notificationTitle = isReferral 
+                ? "Follow-up Referral Session Scheduled" 
+                : "Follow-up Session Scheduled";
+              
+              // PRODUCTION CHANGE #4: More detailed notification body with instructions  
+              const notificationBody = `A follow-up ${isReferral ? 'referral ' : ''}counseling session has been scheduled for ${followUpDate} at ${followUpTime}. Please arrive 5 minutes early.`;
+                
+              await sendNotificationToUser(
+                userId,
+                notificationTitle,
+                notificationBody,
+                {
+                  type: "FOLLOW_UP",
+                  appointmentId: formId,
+                  date: followUpDate,
+                  time: followUpTime,
+                  isReferral: isReferral,
+                  // Production additions
+                  priority: "high",
+                  category: "appointment",
+                  // Add calendar info for potential calendar integration
+                  calendarInfo: {
+                    startTime: `${followUpDate}T${followUpTime}`,
+                    duration: 60, // minutes
+                    location: "Counseling Office"
+                  }
+                }
+              );
+              toast.success(`Follow-up ${isReferral ? 'referral ' : ''}scheduled and notification sent!`);
+            } catch (notifError) {
+              console.error("Error sending notification:", notifError);
+              toast.success(`Follow-up ${isReferral ? 'referral ' : ''}scheduled for ${followUpDate} at ${followUpTime}, but notification failed to send.`);
+            }
+          } else {
+            toast.success(`Follow-up ${isReferral ? 'referral ' : ''}scheduled for ${followUpDate} at ${followUpTime}`);
+          }
+          
+          // Update the local state immediately
+          setForms(prevForms => 
+            prevForms.map(form => 
+              form.id === formId 
+                ? { 
+                    ...form, 
+                    status: 'Scheduled', 
+                    remarks: 'Follow up',
+                    followUpDate,
+                    followUpTime,
+                    sessionNotes: sessionNotes || form.sessionNotes,
+                    updatedAt: new Date().toISOString(),
+                    ...additionalData // Include additional data in state update
+                  } 
+                : form
+            )
+          );
+          
+          // Close modals
+          if (isModalOpen) closeModal();
+          if (isReferralModalOpen) setIsReferralModalOpen(false);
+        } else {
+          toast.error("Failed to schedule follow-up: " + (result.error || "Unknown error"));
+        }
+        return;
+      }
+  
+      // For other status updates (Attended, No Show, etc.)
+      if (['Attended', 'No Show', 'No Response'].includes(newRemark)) {
+        const updateData = {
+          status: 'Completed',
+          completedAt: new Date().toISOString(),
+          ...additionalData // Include any additional data passed in
+        };
+        
+        if (sessionNotes && sessionNotes.trim() !== '') {
+          updateData.sessionNotes = sessionNotes;
+        }
+  
+        console.log("Completing session with remark:", newRemark, "and data:", updateData);
+        
+        const result = await updateFormStatus(formId, 'Completed', newRemark, updateData);
+  
+        if (result.success) {
+          // Send notification based on the specific status
+          if (userId) {
+            try {
+              let notificationTitle, notificationBody;
+              
+              // PRODUCTION CHANGE #5: More detailed and helpful notification messages
+              switch(newRemark) {
+                case 'Attended':
+                  notificationTitle = isReferral ? "Referral Session Completed" : "Session Completed";
+                  notificationBody = `Thank you for attending your ${isReferral ? 'referral ' : ''}counseling session. We hope it was helpful. If you need further assistance, please don't hesitate to contact us.`;
+                  break;
+                  
+                case 'No Show':
+                  notificationTitle = isReferral ? "Missed Referral Appointment" : "Missed Appointment";
+                  notificationBody = `You missed your scheduled ${isReferral ? 'referral ' : ''}appointment on ${appointmentDate}. If you'd like to reschedule, please contact the counseling office at (123) 456-7890 or visit our website.`;
+                  break;
+                  
+                case 'No Response':
+                  notificationTitle = isReferral ? "Referral Appointment Update" : "Appointment Update";
+                  notificationBody = `Your ${isReferral ? 'referral ' : ''}appointment has been marked as 'No Response'. If you'd like to reschedule, please contact the counseling office at (123) 456-7890.`;
+                  break;
+                  
+                default:
+                  notificationTitle = isReferral ? "Referral Appointment Update" : "Appointment Update";
+                  notificationBody = `Your ${isReferral ? 'referral ' : ''}appointment status has been updated to ${newRemark}. For any questions, please contact our office.`;
+              }
+              
+              // PRODUCTION CHANGE #6: Add action buttons data for rich notifications
+              await sendNotificationToUser(
+                userId,
+                notificationTitle,
+                notificationBody,
+                {
+                  type: "SESSION_UPDATE",
+                  appointmentId: formId,
+                  status: newRemark,
+                  isReferral: isReferral,
+                  // Production additions
+                  priority: newRemark === 'No Show' ? "high" : "normal",
+                  category: "session_update",
+                  // Add actions for some platforms
+                  actions: newRemark === 'No Show' ? [
+                    {
+                      id: 'reschedule',
+                      title: 'Reschedule',
+                      url: '/schedule'
+                    },
+                    {
+                      id: 'contact',
+                      title: 'Contact Us',
+                      url: '/contact'
+                    }
+                  ] : undefined
+                }
+              );
+              
+              // PRODUCTION CHANGE #7: Track notification events
+              // trackEvent('notification_sent', {
+              //   type: 'SESSION_UPDATE',
+              //   status: newRemark,
+              //   isReferral: isReferral
+              // });
+              
+              toast.success(`${isReferral ? 'Referral' : 'Session'} moved to history as ${newRemark} and notification sent`);
+            } catch (notifError) {
+              console.error("Error sending notification:", notifError);
+              toast.success(`${isReferral ? 'Referral' : 'Session'} moved to history as ${newRemark}, but notification failed to send`);
+            }
+          } else {
+            toast.success(`${isReferral ? 'Referral' : 'Session'} moved to history as ${newRemark}`);
+          }
+          
+          // Remove from local state
+          setForms(prevForms => prevForms.filter(form => form.id !== formId));
+          
+          // Close modals
+          if (isModalOpen) closeModal();
+          if (isReferralModalOpen) setIsReferralModalOpen(false);
+        } else {
+          toast.error("Failed to update status: " + (result.error || "Unknown error"));
+        }
+      }
+    } catch (error) {
+      // PRODUCTION CHANGE #8: Better error handling
+      console.error("Error in handleRemarkChange:", error);
+      
+      // PRODUCTION CHANGE #9: Log critical errorsa
+      // logErrorToMonitoringService("handle_remark_change_failed", {
+      //   formId,
+      //   newRemark,
+      //   error: error.message,
+      //   stack: error.stack
+      // });
+      
+      toast.error("An error occurred: " + error.message);
+    } finally {
+      setUpdatingId(null);
     }
-
-    // For other status updates (Attended, No Show, etc.)
-    if (['Attended', 'No Show', 'No Response', 'Terminated'].includes(newRemark)) {
-      const additionalData = {
-        status: 'Completed',
-        completedAt: new Date().toISOString()
-      };
-      
-      if (sessionNotes && sessionNotes.trim() !== '') {
-        additionalData.sessionNotes = sessionNotes;
-      }
-
-      console.log("Completing session with remark:", newRemark, "and data:", additionalData);
-      
-      const result = await updateFormStatus(formId, 'Completed', newRemark, additionalData);
-
-      if (result.success) {
-        toast.success(`Session moved to history as ${newRemark}`);
-        
-        // Remove from local state
-        setForms(prevForms => prevForms.filter(form => form.id !== formId));
-        
-        // Close modals
-        if (isModalOpen) closeModal();
-        if (isReferralModalOpen) setIsReferralModalOpen(false);
-      } else {
-        toast.error("Failed to update status: " + (result.error || "Unknown error"));
-      }
-    }
-  } catch (error) {
-    console.error("Error in handleRemarkChange:", error);
-    toast.error("An error occurred: " + error.message);
-  } finally {
-    setUpdatingId(null);
-  }
-};
+  };
 
   // Filter forms by referral type
   const nonReferralForms = forms.filter(form => !form.isReferral);
@@ -665,7 +940,28 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
       )}
   
       <div className="max-w-8xl mx-auto px-6 pt-12">
-        <h1 className="text-2xl font-bold mb-6">Non-Referral</h1>
+  <div className="flex justify-between items-center mb-6">
+    <h1 className="text-2xl font-bold">Non-Referral</h1>
+    <button
+      onClick={() => openNotificationModal()}
+      className="bg-[#3A0323] hover:bg-[#2a021a] text-white px-4 py-2 rounded-md transition-colors text-sm flex items-center justify-center"
+    >
+      <svg 
+        className="w-4 h-4 mr-1" 
+        fill="none" 
+        stroke="currentColor" 
+        viewBox="0 0 24 24"
+      >
+        <path 
+          strokeLinecap="round" 
+          strokeLinejoin="round" 
+          strokeWidth={2} 
+          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" 
+        />
+      </svg>
+      Send Notification
+    </button>
+  </div>
         <div className="bg-white shadow-md rounded-lg overflow-hidden">
           <table className="min-w-full bg-white">
             <thead className="bg-[#3A0323] border-b text-white">
@@ -711,9 +1007,10 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
                         <option value="Attended">Attended</option>
                         <option value="No Show">No Show</option>
                         <option value="No Response">No Response</option>
-                        <option value="Terminated">Terminated</option>
+                        
                         <option value="Follow up">Follow-up</option>
                       </select>
+                      
                     </td>
                   </tr>
                 ))
@@ -776,7 +1073,7 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
                         <option value="Attended">Attended</option>
                         <option value="No Show">No Show</option>
                         <option value="No Response">No Response</option>
-                        <option value="Terminated">Terminated</option>
+                        
                         <option value="Follow up">Follow-up</option>
                       </select>
                     </td>
@@ -821,6 +1118,21 @@ const handleRemarkChange = async (formId, newRemark, followUpDate = null, sessio
     isValidDate={isValidDate}  // Pass the function as a prop
   />
 )}
+{isNotificationModalOpen && selectedNotificationStudent && (
+  <NotificationModal
+    student={selectedNotificationStudent}
+    onClose={() => {
+      setIsNotificationModalOpen(false);
+      setSelectedNotificationStudent(null);
+    }}
+    onSend={(result) => {
+      console.log('Notification sent:', result);
+      setIsNotificationModalOpen(false);
+      setSelectedNotificationStudent(null);
+    }}
+  />
+)}
+
 
 
       {/* Follow-up Scheduler Modal */}

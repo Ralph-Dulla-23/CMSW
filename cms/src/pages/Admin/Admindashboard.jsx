@@ -15,7 +15,7 @@ const dashboardCache = {
   lastFetched: null,
   expiryTime: 5 * 60 * 1000 // 5 minutes in milliseconds
 };
-
+  
 function AdminDashboard() {
   const navigate = useNavigate();
   const [studentsPerCollegeData, setStudentsPerCollegeData] = useState({});

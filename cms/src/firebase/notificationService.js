@@ -1,10 +1,24 @@
 // src/firebase/notificationService.js
 
 import { db } from './firebase-config';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { 
+  collection, 
+  addDoc, 
+  Timestamp,
+  getDocs,
+  query,
+  where,
+  updateDoc,
+  doc
+} from 'firebase/firestore';
 
 /**
  * Sends a notification to a specific user
+ * @param {string} userId - The user ID to send notification to
+ * @param {string} title - Notification title
+ * @param {string} body - Notification body
+ * @param {Object} data - Additional data for the notification
+ * @returns {Object} - Success status or error message
  */
 export const sendNotificationToUser = async (userId, title, body, data = {}) => {
   try {
@@ -12,25 +26,19 @@ export const sendNotificationToUser = async (userId, title, body, data = {}) => 
     
     if (!userId) {
       console.error("No userId provided for notification");
-      return { success: false, error: "User ID is required" };
+      return { success: false, error: "User ID is required for sending notifications" };
     }
 
-    // Create notification document in Firestore
+    // Create a notification document in Firestore
     const notificationData = {
       userId: userId,
       title: title,
       body: body,
-      data: {
-        ...data,
-        // Remove any test flags
-        isTest: false,
-        // Add timestamp for tracking
-        timestamp: Date.now()
-      },
+      data: data,
       read: false,
-      sent: false,
+      sent: false, // This will be used by the FCM cloud function
       createdAt: new Date().toISOString(),
-      createdAtTimestamp: Timestamp.now()
+      createdAtTimestamp: Timestamp.now(), // Add a Firestore timestamp for queries
     };
     
     const notificationRef = await addDoc(collection(db, "notifications"), notificationData);
