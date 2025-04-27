@@ -15,8 +15,7 @@ const dashboardCache = {
   lastFetched: null,
   expiryTime: 5 * 60 * 1000 // 5 minutes in milliseconds
 };
-  
-function AdminDashboard() {
+  function AdminDashboard() {
   const navigate = useNavigate();
   const [studentsPerCollegeData, setStudentsPerCollegeData] = useState({});
   const [sessionTypesData, setSessionTypesData] = useState({});
@@ -294,219 +293,283 @@ function AdminDashboard() {
   };
 
   // Process all forms data to extract necessary information
-  const processFormsData = (allForms) => {
-    try {
-      console.log(`Processing ${allForms.length} total forms`);
-      
-      // Initialize counters and data structures
-      const collegeCounts = {};
-      const sessionTypes = {
-        'Walk-in': 0,
-        'Online': 0,
-        'Referral': 0
-      };
-      
-      // Get current date references
-      const now = new Date();
-      const yesterday = subDays(now, 1);
-      const thisWeekStart = startOfWeek(now);
-      const thisMonthStart = startOfMonth(now);
-      
-      // Initialize stats
-      let totalStudents = 0;
-      let newRequests = 0;
-      let completedSessions = 0;
-      let noShows = 0;
-      
-      // Track recent activities
-      const recentActivitiesList = [];
+  // Process all forms data to extract necessary information
+const processFormsData = (allForms) => {
+  try {
+    console.log(`Processing ${allForms.length} total forms`);
+    
+    // Initialize counters and data structures
+    const collegeCounts = {};
+    const sessionTypes = {
+      'Walk-in': 0,
+      'Online': 0,
+      'Referral': 0
+    };
+    
+    // Get current date references
+    const now = new Date();
+    const yesterday = subDays(now, 1);
+    const thisWeekStart = startOfWeek(now);
+    const thisMonthStart = startOfMonth(now);
+    
+    // Initialize stats
+    let totalStudents = 0;
+    let newRequests = 0;
+    let completedSessions = 0;
+    let noShows = 0;
+    
+    // Track recent activities
+    const recentActivitiesList = [];
 
-      // Process each form
-      allForms.forEach((form) => {
-        try {
-          // Extract basic info
-          const studentName = form.name || form.studentName || form.clientName || form.fullName || 'Unknown Student';
-          const { course, yearSection } = extractCourseAndYearSection(form);
-          
-          // Determine college name with fallbacks
-          let collegeName;
-          if (form.college) {
-            collegeName = form.college;
-          } else if (form.course) {
-            collegeName = getDepartmentFromCourse(form.course);
-          } else {
-            collegeName = getDepartmentFromCourse(course) || 'Unknown College';
-          }
-          
-          // Parse submission date with various fallback options
-          let submissionDate;
-          if (form.remarks === 'Follow up' && form.followUpDate) {
-            submissionDate = parseDateSafely(form.followUpDate);
-          } else if (form.date) {
-            submissionDate = parseDateSafely(form.date);
-          } else if (form.submissionDate) {
-            submissionDate = parseDateSafely(form.submissionDate);
-          } else if (form.createdAt) {
-            submissionDate = parseDateSafely(form.createdAt);
-          } else if (form.timestamp) {
-            submissionDate = parseDateSafely(form.timestamp);
-          } else if (form.dateTime) {
-            submissionDate = parseDateSafely(form.dateTime);
-          } else if (form.movedToHistoryAt) {
-            submissionDate = parseDateSafely(form.movedToHistoryAt);
-          } else {
-            submissionDate = new Date(); // Default to current date if no date found
-          }
-          
-          const formattedDate = submissionDate ? formatDate(submissionDate) : 'Unknown Date';
-          
-          // Determine session type
-          const isReferral = form.isReferral === true;
-          let sessionType;
-          if (isReferral) {
-            sessionType = 'Referral';
-          } else if (form.selectedMode === 'Online' || form.type === 'Online') {
-            sessionType = 'Online';
-          } else {
-            sessionType = 'Walk-in';
-          }
-          
-          // Get status with fallbacks
-          const status = form.status || 'Pending';
-          const remarks = form.remarks || '';
-          
-          // Count by college
-          collegeCounts[collegeName] = (collegeCounts[collegeName] || 0) + 1;
-          
-          // Count by session type
-          sessionTypes[sessionType] = (sessionTypes[sessionType] || 0) + 1;
-          
-          // Count total students
-          totalStudents++;
-          
-          // Count new requests since yesterday
-          if (submissionDate && isAfter(submissionDate, yesterday)) {
-            newRequests++;
-          }
-          
-          // Count completed sessions this month
-          if (status === 'Completed' && submissionDate && isAfter(submissionDate, thisMonthStart)) {
-            completedSessions++;
-          }
-          
-          // Count no-shows this week
-          if ((status === 'No-show' || status === 'No Show' || 
-               remarks === 'No Show' || remarks === 'No-show') && 
-              submissionDate && isAfter(submissionDate, thisWeekStart)) {
-            noShows++;
-          }
-          
-          // Add to recent activities (limit to most recent 3)
-          if (recentActivitiesList.length < 3) {
-            recentActivitiesList.push({
-              id: form.id || `form-${recentActivitiesList.length}`,
-              studentName: studentName, 
-              course: collegeName,
-              yearSection: yearSection,
-              submissionDate: formattedDate,
-              isReferral,
-              type: sessionType
-            });
-          }
-        } catch (formError) {
-          console.error("Error processing form:", formError, form.id);
+    // Process each form
+    allForms.forEach((form) => {
+      try {
+        // Extract basic info
+        const studentName = form.name || form.studentName || form.clientName || form.fullName || 'Unknown Student';
+        const { course, yearSection } = extractCourseAndYearSection(form);
+        
+        // Determine college name with fallbacks
+        let collegeName;
+        if (form.college) {
+          collegeName = form.college;
+        } else if (form.course) {
+          collegeName = getDepartmentFromCourse(form.course);
+        } else {
+          collegeName = getDepartmentFromCourse(course) || 'Unknown College';
         }
-      });
+        
+        // Parse submission date with various fallback options
+        let submissionDate;
+        if (form.remarks === 'Follow up' && form.followUpDate) {
+          submissionDate = parseDateSafely(form.followUpDate);
+        } else if (form.date) {
+          submissionDate = parseDateSafely(form.date);
+        } else if (form.submissionDate) {
+          submissionDate = parseDateSafely(form.submissionDate);
+        } else if (form.createdAt) {
+          submissionDate = parseDateSafely(form.createdAt);
+        } else if (form.timestamp) {
+          submissionDate = parseDateSafely(form.timestamp);
+        } else if (form.dateTime) {
+          submissionDate = parseDateSafely(form.dateTime);
+        } else if (form.movedToHistoryAt) {
+          submissionDate = parseDateSafely(form.movedToHistoryAt);
+        } else {
+          submissionDate = new Date(); // Default to current date if no date found
+        }
+        
+        const formattedDate = submissionDate ? formatDate(submissionDate) : 'Unknown Date';
+        
+        // Determine session type
+        const isReferral = form.isReferral === true;
+        let sessionType;
+        if (isReferral) {
+          sessionType = 'Referral';
+        } else if (form.selectedMode === 'Online' || form.type === 'Online') {
+          sessionType = 'Online';
+        } else {
+          sessionType = 'Walk-in';
+        }
+        
+        // Get status with fallbacks
+        const status = form.status || 'Pending';
+        const remarks = form.remarks || '';
+        
+        // Count by college
+        collegeCounts[collegeName] = (collegeCounts[collegeName] || 0) + 1;
+        
+        // Count by session type
+        sessionTypes[sessionType] = (sessionTypes[sessionType] || 0) + 1;
+        
+        // Count total students
+        totalStudents++;
+        
+        // Count new requests since yesterday
+        if (submissionDate && isAfter(submissionDate, yesterday)) {
+          newRequests++;
+        }
+        
+        // Count completed sessions this month
+        if (status === 'Completed' && submissionDate && isAfter(submissionDate, thisMonthStart)) {
+          completedSessions++;
+        }
+        
+        // Count no-shows this week
+        if ((status === 'No-show' || status === 'No Show' || 
+             remarks === 'No Show' || remarks === 'No-show') && 
+            submissionDate && isAfter(submissionDate, thisWeekStart)) {
+          noShows++;
+        }
+        
+        // Add to recent activities (limit to most recent 3)
+        if (recentActivitiesList.length < 3) {
+          recentActivitiesList.push({
+            id: form.id || `form-${recentActivitiesList.length}`,
+            studentName: studentName, 
+            course: collegeName,
+            yearSection: yearSection,
+            submissionDate: formattedDate,
+            isReferral,
+            type: sessionType
+          });
+        }
+      } catch (formError) {
+        console.error("Error processing form:", formError, form.id);
+      }
+    });
 
-      // Sort recent activities by date (newest first)
-      recentActivitiesList.sort((a, b) => {
-        const dateA = new Date(a.submissionDate);
-        const dateB = new Date(b.submissionDate);
-        return dateB - dateA;
-      });
+    // Sort recent activities by date (newest first)
+    recentActivitiesList.sort((a, b) => {
+      const dateA = new Date(a.submissionDate);
+      const dateB = new Date(b.submissionDate);
+      return dateB - dateA;
+    });
 
-      // Prepare pie chart data for colleges
-      const collegeData = {
-        labels: Object.keys(collegeCounts),
-        datasets: [
-          {
-            label: 'Students per College',
-            data: Object.values(collegeCounts),
-            backgroundColor: chartColors.backgroundColor.slice(0, Object.keys(collegeCounts).length),
-            borderColor: chartColors.borderColor.slice(0, Object.keys(collegeCounts).length),
-            borderWidth: 1,
+    // Prepare pie chart data for colleges
+    const collegeData = {
+      labels: Object.keys(collegeCounts),
+      datasets: [
+        {
+          label: 'Students per College',
+          data: Object.values(collegeCounts),
+          backgroundColor: chartColors.backgroundColor.slice(0, Object.keys(collegeCounts).length),
+          borderColor: chartColors.borderColor.slice(0, Object.keys(collegeCounts).length),
+          borderWidth: 1,
+        },
+      ],
+    };
+
+    // Prepare bar chart data for session types - updated structure
+    const sessionData = {
+      labels: Object.keys(sessionTypes),
+      datasets: [
+        {
+          label: '', // Remove the overall label
+          data: Object.values(sessionTypes),
+          backgroundColor: [
+            chartColors.backgroundColor[0],
+            chartColors.backgroundColor[1],
+            chartColors.backgroundColor[2]
+          ],
+          borderColor: [
+            chartColors.borderColor[0],
+            chartColors.borderColor[1],
+            chartColors.borderColor[2]
+          ],
+          borderWidth: 1,
+        },
+      ],
+    };
+
+    // Create specific options for the pie chart
+    const pieOptions = {
+      plugins: {
+        legend: {
+          position: 'right',
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const label = context.label || '';
+              const value = context.raw || 0;
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const percentage = Math.round((value / total) * 100);
+              return `${label}: ${value} (${percentage}%)`;
+            }
+          }
+        }
+      },
+      responsive: true,
+      maintainAspectRatio: false,
+      // Remove axes completely for pie chart
+      scales: {}
+    };
+
+    // Create specific options for the bar chart
+    const barOptions = {
+      plugins: {
+        legend: {
+          display: false, // Hide the legend for the bar chart
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const label = context.label || '';
+              const value = context.raw || 0;
+              return `${label}: ${value}`;
+            }
+          }
+        }
+      },
+      responsive: true,
+      maintainAspectRatio: false,
+      // Improve scales for bar chart
+      scales: {
+        x: {
+          grid: {
+            display: false
           },
-        ],
-      };
-
-      // Prepare bar chart data for session types
-      const sessionData = {
-        labels: Object.keys(sessionTypes),
-        datasets: [
-          {
-            label: 'Session Types',
-            data: Object.values(sessionTypes),
-            backgroundColor: chartColors.backgroundColor.slice(0, 3),
-            borderColor: chartColors.borderColor.slice(0, 3),
-            borderWidth: 1,
-          },
-        ],
-      };
-
-      // Set chart options
-      const options = {
-        plugins: {
-          legend: {
-            position: 'right',
-          },
-          tooltip: {
-            callbacks: {
-              label: function(context) {
-                const label = context.label || '';
-                const value = context.raw || 0;
-                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                const percentage = Math.round((value / total) * 100);
-                return `${label}: ${value} (${percentage}%)`;
-              }
+          ticks: {
+            font: {
+              weight: 'bold'
             }
           }
         },
-        responsive: true,
-        maintainAspectRatio: false,
-      };
+        y: {
+          beginAtZero: true,
+          grid: {
+            borderDash: [2, 4]
+          },
+          ticks: {
+            precision: 0 // Show only whole numbers
+          }
+        }
+      },
+      indexAxis: 'x', // Ensure horizontal bars
+      barPercentage: 0.6, // Make bars thinner
+      categoryPercentage: 0.8
+    };
 
-      // Update all state variables
-      setStudentsPerCollegeData(collegeData);
-      setSessionTypesData(sessionData);
-      setChartOptions(options);
-      setDashboardStats({
+    // Update all state variables
+    setStudentsPerCollegeData(collegeData);
+    setSessionTypesData(sessionData);
+    // Store both options in the state
+    setChartOptions({
+      pie: pieOptions,
+      bar: barOptions
+    });
+
+    setDashboardStats({
+      totalStudents,
+      newRequests,
+      completedSessions,
+      noShows
+    });
+    setRecentActivities(recentActivitiesList);
+
+    // Store processed data in cache
+    dashboardCache.data = {
+      collegeData,
+      sessionData,
+      chartOptions: {
+        pie: pieOptions,
+        bar: barOptions
+      },
+      stats: {
         totalStudents,
         newRequests,
         completedSessions,
         noShows
-      });
-      setRecentActivities(recentActivitiesList);
-
-      // Store processed data in cache
-      dashboardCache.data = {
-        collegeData,
-        sessionData,
-        options,
-        stats: {
-          totalStudents,
-          newRequests,
-          completedSessions,
-          noShows
-        },
-        recentActivities: recentActivitiesList
-      };
-      dashboardCache.lastFetched = Date.now();
-      
-    } catch (error) {
-      console.error("Error processing forms data:", error);
-      setError("Error processing dashboard data: " + error.message);
-    }
-  };
+      },
+      recentActivities: recentActivitiesList
+    };
+    dashboardCache.lastFetched = Date.now();
+    
+  } catch (error) {
+    console.error("Error processing forms data:", error);
+    setError("Error processing dashboard data: " + error.message);
+  }
+};
 
   // Main data fetching function
   const fetchDashboardData = async () => {
@@ -523,14 +586,25 @@ function AdminDashboard() {
       ) {
         console.log("Using cached dashboard data");
         
-        // Use cached data
-        setStudentsPerCollegeData(dashboardCache.data.collegeData);
-        setSessionTypesData(dashboardCache.data.sessionData);
-        setChartOptions(dashboardCache.data.options);
-        setDashboardStats(dashboardCache.data.stats);
-        setRecentActivities(dashboardCache.data.recentActivities);
-        setLoading(false);
-        return;
+        // Make sure we have valid chart options before using cached data
+        if (dashboardCache.data.chartOptions && 
+            dashboardCache.data.chartOptions.pie && 
+            dashboardCache.data.chartOptions.bar) {
+          
+          // Use cached data
+          setStudentsPerCollegeData(dashboardCache.data.collegeData);
+          setSessionTypesData(dashboardCache.data.sessionData);
+          setChartOptions(dashboardCache.data.chartOptions);
+          setDashboardStats(dashboardCache.data.stats);
+          setRecentActivities(dashboardCache.data.recentActivities);
+          setLoading(false);
+          return;
+        } else {
+          console.log("Cached chart options are invalid, fetching fresh data");
+          // Continue to fetch fresh data
+        }
+      } else {
+        console.log("No valid cache, fetching fresh data");
       }
       
       console.log("Fetching fresh dashboard data...");
@@ -716,28 +790,43 @@ function AdminDashboard() {
               </div>
             </div>
 
-            {/* Charts */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-              {/* Pie Chart */}
-              <div className="bg-white border p-6 rounded-lg shadow-md pb-8">
-                <h2 className="text-lg font-bold">Students per College</h2>
-                {Object.keys(studentsPerCollegeData).length > 0 && studentsPerCollegeData.labels?.length > 0 ? (
-                  <Chart type="pie" data={studentsPerCollegeData} options={chartOptions} style={{ width: '100%', height: '250px' }} />
-                ) : (
-                  <p className="flex justify-center items-center h-64 text-gray-500">No data available</p>
-                )}
-              </div>
+           {/* Charts */}
+<div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+  {/* Pie Chart */}
+  <div className="bg-white border p-6 rounded-lg shadow-md">
+    <h2 className="text-lg font-bold">Students per College</h2>
+    {Object.keys(studentsPerCollegeData).length > 0 && studentsPerCollegeData.labels?.length > 0 ? (
+      <div className="mt-4" style={{ height: '300px' }}>
+        <Chart 
+          type="pie" 
+          data={studentsPerCollegeData} 
+          options={chartOptions.pie} 
+        />
+      </div>
+    ) : (
+      <p className="flex justify-center items-center h-64 text-gray-500">No data available</p>
+    )}
+  </div>
 
-              {/* Bar Chart */}
-              <div className="bg-white border p-6 rounded-lg shadow-md pb-8">
-                <h2 className="text-lg font-bold">Session Types</h2>
-                {Object.keys(sessionTypesData).length > 0 && sessionTypesData.labels?.length > 0 ? (
-                  <Chart type="bar" data={sessionTypesData} options={chartOptions} style={{ width: '100%', height: '250px' }} />
-                ) : (
-                  <p className="flex justify-center items-center h-64 text-gray-500">No data available</p>
-                )}
-              </div>
-            </div>
+  {/* Bar Chart */}
+  {/* Bar Chart */}
+<div className="bg-white border p-6 rounded-lg shadow-md">
+  <h2 className="text-lg font-bold">Session Types</h2>
+  {Object.keys(sessionTypesData).length > 0 && sessionTypesData.labels?.length > 0 ? (
+    <div className="mt-4 w-full" style={{ height: '300px', position: 'relative' }}>
+      <Chart 
+        type="bar" 
+        data={sessionTypesData} 
+        options={chartOptions.bar} 
+      />
+    </div>
+  ) : (
+    <p className="flex justify-center items-center h-64 text-gray-500">No data available</p>
+  )}
+</div>
+</div>
+
+            
           </>
         )}
       </div>

@@ -25,14 +25,11 @@ function App() {
           className="w-12 h-12 md:w-16 md:h-16 ml-0 lg:ml-0" // Adjusted Logo Size and Margin
         />
         <div className="flex gap-4 md:gap-6">
-          <button className="text-gray-700 font-medium hover:text-[#3A0323] transition-colors" 
+          <button className="bg-[#3A0323] hover:bg-[#2a021a] text-white px-4 py-2 md:px-6 md:py-3 rounded-md transition-colors"
                   onClick={handleLoginUpClick}>
             Login
           </button>
-          <button className="bg-[#3A0323] hover:bg-[#2a021a] text-white px-4 py-2 md:px-6 md:py-3 rounded-md transition-colors" 
-                  onClick={handleSignUpClick}>
-            Signup
-          </button>
+          
         </div>
       </div>
 
