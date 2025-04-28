@@ -60,7 +60,7 @@ const NotificationModal = ({ onClose }) => {
 
       case 'ONLINE':
         newTitle = 'Online Session Reminder';
-        newBody = `Dear ${selectedUserName}, this is a reminder for your upcoming online counseling session. Please ensure you have a stable internet connection. <i>Add link here to the session<i>`;
+        newBody = `Dear ${selectedUserName}, this is a reminder for your upcoming online counseling session. Please ensure you have a stable internet connection. Add link here to the session`;
         break;
       case 'ATTENDED':
         newTitle = 'Session Completed';
