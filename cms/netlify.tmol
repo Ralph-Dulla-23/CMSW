@@ -1,0 +1,12 @@
+[build]
+  base = "cms"
+  publish = "cms/dist"
+  command = "npm run build"
+
+# Optional: specify Node version (if needed)
+# [build.environment]
+#   NODE_VERSION = "18"
+
+# Optional: Functions directory (only if you're using Netlify Functions)
+# [functions]
+#   directory = "cms/netlify/functions"
